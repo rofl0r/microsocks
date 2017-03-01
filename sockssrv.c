@@ -35,6 +35,8 @@
 
 static const char* auth_user;
 static const char* auth_pass;
+static sblist* auth_ips;
+static pthread_mutex_t auth_ips_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -67,6 +69,7 @@ struct thread {
 	enum socksstate state;
 	volatile int  done;
 };
+
 #ifndef CONFIG_LOG
 #define CONFIG_LOG 1
 #endif
@@ -149,7 +152,18 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	return fd;
 }
 
-static enum authmethod check_auth_method(unsigned char *buf, size_t n) {
+static int is_authed(union sockaddr_union *client, union sockaddr_union *authedip) {
+	if(authedip->v4.sin_family == client->v4.sin_family) {
+		int af = authedip->v4.sin_family;
+		size_t cmpbytes = af == AF_INET ? 4 : 16;
+		void *cmp1 = af == AF_INET ? (void*)&client->v4.sin_addr : (void*)&client->v6.sin6_addr;
+		void *cmp2 = af == AF_INET ? (void*)&authedip->v4.sin_addr : (void*)&authedip->v6.sin6_addr;
+		if(!memcmp(cmp1, cmp2, cmpbytes)) return 1;
+	}
+	return 0;
+}
+
+static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct client*client) {
 	if(buf[0] != 5) return AM_INVALID;
 	size_t idx = 1;
 	if(idx >= n ) return AM_INVALID;
@@ -158,12 +172,29 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n) {
 	while(idx < n) {
 		if(buf[idx] == AM_NO_AUTH) {
 			if(!auth_user) return AM_NO_AUTH;
+			else if(auth_ips) {
+				size_t i;
+				int authed = 0;
+				pthread_mutex_lock(&auth_ips_mutex);
+				for(i=0;i<sblist_getsize(auth_ips);i++) {
+					if((authed = is_authed(&client->addr, sblist_get(auth_ips, i))))
+						break;
+				}
+				pthread_mutex_unlock(&auth_ips_mutex);
+				if(authed) return AM_NO_AUTH;
+			}
 		} else if(buf[idx] == AM_USERNAME) {
 			if(auth_user) return AM_USERNAME;
 		}
 		idx++;
 	}
 	return AM_INVALID;
+}
+
+static void add_auth_ip(struct client*client) {
+	pthread_mutex_lock(&auth_ips_mutex);
+	sblist_add(auth_ips, &client->addr);
+	pthread_mutex_unlock(&auth_ips_mutex);
 }
 
 static void send_auth_response(int fd, enum authmethod meth) {
@@ -242,7 +273,7 @@ static void* clientthread(void *data) {
 	while((n = recv(t->client.fd, buf, sizeof buf, 0)) > 0) {
 		switch(t->state) {
 			case SS_1_CONNECTED:
-				am = check_auth_method(buf, n);
+				am = check_auth_method(buf, n, &t->client);
 				if(am == AM_NO_AUTH) t->state = SS_3_AUTHED;
 				else if (am == AM_USERNAME) t->state = SS_2_NEED_AUTH;
 				send_auth_response(t->client.fd, am);
@@ -254,6 +285,7 @@ static void* clientthread(void *data) {
 				if(ret != EC_SUCCESS)
 					goto breakloop;
 				t->state = SS_3_AUTHED;
+				if(auth_ips) add_auth_ip(&t->client);
 				break;
 			case SS_3_AUTHED:
 				ret = connect_socks_target(buf, n, &t->client);
@@ -296,9 +328,15 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -i listenip -p port -u user -P password\n"
+		"usage: microsocks -1 -i listenip -p port -u user -P password\n"
 		"all arguments are optional.\n"
-		"by default listenip is 0.0.0.0 and port 1080.\n"
+		"by default listenip is 0.0.0.0 and port 1080.\n\n"
+		"option -1 activates auth_once mode: once a specific ip address\n"
+		"authed successfully with user/pass, it is added to a whitelist\n"
+		"and may use the proxy without auth.\n"
+		"this is handy for programs like firefox that don't support\n"
+		"user/pass auth. for it to work you'd basically make one connection\n"
+		"with another program that supports it, and then you can use firefox too.\n"
 	);
 	return 1;
 }
@@ -313,8 +351,11 @@ int main(int argc, char** argv) {
 	int c;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
-	while((c = getopt(argc, argv, ":i:p:u:P:")) != -1) {
+	while((c = getopt(argc, argv, ":1i:p:u:P:")) != -1) {
 		switch(c) {
+			case '1':
+				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				break;
 			case 'u':
 				auth_user = strdup(optarg);
 				zero_arg(optarg);
@@ -337,6 +378,10 @@ int main(int argc, char** argv) {
 	}
 	if((auth_user && !auth_pass) || (!auth_user && auth_pass)) {
 		dprintf(2, "error: user and pass must be used together\n");
+		return 1;
+	}
+	if(auth_ips && !auth_pass) {
+		dprintf(2, "error: auth-once option must be used together with user/pass\n");
 		return 1;
 	}
 	struct server s;
