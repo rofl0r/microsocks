@@ -351,6 +351,7 @@ int main(int argc, char** argv) {
 		if(server_waitclient(&s, &c)) continue;
 		curr->client = c;
 		if(!sblist_add(threads, &curr)) {
+			close(curr->client.fd);
 			free(curr);
 			oom:
 			dolog("rejecting connection due to OOM\n");
