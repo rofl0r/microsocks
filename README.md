@@ -11,7 +11,7 @@ the main process basically doesn't consume any resources at all.
 
 the only limits are the amount of file descriptors and the RAM.
 
-It's also designed to be robusted: it handles resource exhaustion
+It's also designed to be robust: it handles resource exhaustion
 gracefully by simply denying new connections, instead of calling abort()
 as most other programs do these days.
 
