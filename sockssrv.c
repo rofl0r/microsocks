@@ -230,7 +230,7 @@ static void copyloop(int fd1, int fd2) {
 				send_error(fd1, EC_TTL_EXPIRED);
 				return;
 			case -1:
-				if(errno = EINTR) continue;
+				if(errno == EINTR) continue;
 				else perror("select");
 				return;
 		}
