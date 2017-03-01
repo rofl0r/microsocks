@@ -169,7 +169,7 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct cl
 	if(idx >= n ) return AM_INVALID;
 	int n_methods = buf[idx];
 	idx++;
-	while(idx < n) {
+	while(idx < n && n_methods > 0) {
 		if(buf[idx] == AM_NO_AUTH) {
 			if(!auth_user) return AM_NO_AUTH;
 			else if(auth_ips) {
@@ -187,6 +187,7 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct cl
 			if(auth_user) return AM_USERNAME;
 		}
 		idx++;
+		n_methods--;
 	}
 	return AM_INVALID;
 }
