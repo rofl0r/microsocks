@@ -341,7 +341,10 @@ int main(int argc, char** argv) {
 	}
 	struct server s;
 	sblist *threads = sblist_new(sizeof (struct thread*), 8);
-	if(server_setup(&s, listenip, port)) return 1;
+	if(server_setup(&s, listenip, port)) {
+		perror("server_setup");
+		return 1;
+	}
 	while(1) {
 		collect(threads);
 		struct client c;
