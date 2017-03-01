@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -385,6 +386,7 @@ int main(int argc, char** argv) {
 		dprintf(2, "error: auth-once option must be used together with user/pass\n");
 		return 1;
 	}
+	signal(SIGPIPE, SIG_IGN);
 	struct server s;
 	sblist *threads = sblist_new(sizeof (struct thread*), 8);
 	if(server_setup(&s, listenip, port)) {
