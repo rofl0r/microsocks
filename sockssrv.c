@@ -31,7 +31,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include "server.h"
-#include "../lib/include/sblist.h"
+#include "sblist.h"
 
 static const char* auth_user;
 static const char* auth_pass;
