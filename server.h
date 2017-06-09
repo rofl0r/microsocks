@@ -1,6 +1,9 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#undef _POSIX_SOURCE
+#define _POSIX_SOURCE 200809L
+
 #include <sys/socket.h>
 #include <netdb.h>
 
