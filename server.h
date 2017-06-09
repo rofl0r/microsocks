@@ -2,7 +2,7 @@
 #define SERVER_H
 
 #undef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 201112L
+#define _POSIX_C_SOURCE 200809L
 
 #include <sys/socket.h>
 #include <netdb.h>
