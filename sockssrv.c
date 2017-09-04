@@ -36,6 +36,7 @@
 
 static const char* auth_user;
 static const char* auth_pass;
+static const char* bind_ip;
 static sblist* auth_ips;
 static pthread_mutex_t auth_ips_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -92,6 +93,7 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	int af = AF_INET;
 	size_t minlen = 4 + 4 + 2, l;
 	char namebuf[256];
+	struct sockaddr_in local;
 	struct addrinfo* remote;
 
 	switch(buf[3]) {
@@ -139,6 +141,15 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
+
+	local.sin_family = AF_INET;
+	local.sin_port = 0;
+	local.sin_addr.s_addr = inet_addr(bind_ip);
+
+	// bind before connect to use the listen address as the outgoing address
+	if(bind(fd, (struct sockaddr*) &local, sizeof(local)) < 0)
+		goto eval_errno;
+
 	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
 		goto eval_errno;
 
@@ -368,6 +379,7 @@ int main(int argc, char** argv) {
 				break;
 			case 'i':
 				listenip = optarg;
+				bind_ip = optarg;
 				break;
 			case 'p':
 				port = atoi(optarg);
