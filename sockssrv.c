@@ -142,13 +142,15 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		}
 	}
 
-	local.sin_family = AF_INET;
-	local.sin_port = 0;
-	local.sin_addr.s_addr = inet_addr(bind_ip);
+	if(bind_ip != NULL) {
+		local.sin_family = AF_INET;
+		local.sin_port = 0;
+		local.sin_addr.s_addr = inet_addr(bind_ip);
 
-	// bind before connect to use the listen address as the outgoing address
-	if(bind(fd, (struct sockaddr*) &local, sizeof(local)) < 0)
-		goto eval_errno;
+		// bind before connect to use the listen address as the outgoing address
+		if(bind(fd, (struct sockaddr*) &local, sizeof(local)) < 0)
+			goto eval_errno;
+	}
 
 	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
 		goto eval_errno;
