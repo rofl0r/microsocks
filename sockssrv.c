@@ -38,6 +38,7 @@ static const char* auth_user;
 static const char* auth_pass;
 static sblist* auth_ips;
 static pthread_mutex_t auth_ips_mutex = PTHREAD_MUTEX_INITIALIZER;
+static const struct server* server;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -139,6 +140,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
+	if(server_bindtoip(server, fd) == -1)
+		goto eval_errno;
 	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
 		goto eval_errno;
 
@@ -393,6 +396,7 @@ int main(int argc, char** argv) {
 		perror("server_setup");
 		return 1;
 	}
+	server = &s;
 	while(1) {
 		collect(threads);
 		struct client c;

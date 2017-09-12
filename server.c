@@ -1,5 +1,6 @@
 #include "server.h"
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 int resolve(const char *host, unsigned short port, struct addrinfo** addr) {
@@ -11,6 +12,12 @@ int resolve(const char *host, unsigned short port, struct addrinfo** addr) {
 	char port_buf[8];
 	snprintf(port_buf, sizeof port_buf, "%u", port);
 	return getaddrinfo(host, port_buf, &hints, addr);
+}
+
+int server_bindtoip(const struct server *server, int fd) {
+	if(server->bindaddr.v4.sin_family != AF_UNSPEC)
+		return bind(fd, (struct sockaddr*) &server->bindaddr, server->bindaddrsz);
+	return 0;
 }
 
 int server_waitclient(struct server *server, struct client* client) {
@@ -42,5 +49,10 @@ int server_setup(struct server *server, const char* listenip, unsigned short por
 		return -3;
 	}
 	server->fd = listenfd;
+	if(strcmp(listenip, "0.0.0.0") && !resolve(listenip, 0, &ainfo)) {
+		server->bindaddrsz = ainfo->ai_addrlen;
+		memcpy(&server->bindaddr, ainfo->ai_addr, ainfo->ai_addrlen);
+		freeaddrinfo(ainfo);
+	} else server->bindaddr.v4.sin_family = AF_UNSPEC;
 	return 0;
 }

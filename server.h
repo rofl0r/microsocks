@@ -20,10 +20,13 @@ struct client {
 };
 
 struct server {
+	union sockaddr_union bindaddr;
 	int fd;
+	socklen_t bindaddrsz;
 };
 
 int resolve(const char *host, unsigned short port, struct addrinfo** addr);
+int server_bindtoip(const struct server *server, int fd);
 int server_waitclient(struct server *server, struct client* client);
 int server_setup(struct server *server, const char* listenip, unsigned short port);
 
