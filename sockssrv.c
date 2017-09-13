@@ -39,6 +39,7 @@ static const char* auth_pass;
 static sblist* auth_ips;
 static pthread_mutex_t auth_ips_mutex = PTHREAD_MUTEX_INITIALIZER;
 static const struct server* server;
+static int bind_mode;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -140,7 +141,7 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
-	if(server_bindtoip(server, fd) == -1)
+	if(bind_mode && server_bindtoip(server, fd) == -1)
 		goto eval_errno;
 	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
 		goto eval_errno;
@@ -333,9 +334,10 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -i listenip -p port -u user -P password\n"
+		"usage: microsocks -1 -b -i listenip -p port -u user -P password\n"
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
+		"option -b forces outgoing connections to be bound to the ip specified with -i\n"
 		"option -1 activates auth_once mode: once a specific ip address\n"
 		"authed successfully with user/pass, it is added to a whitelist\n"
 		"and may use the proxy without auth.\n"
@@ -356,10 +358,13 @@ int main(int argc, char** argv) {
 	int c;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
-	while((c = getopt(argc, argv, ":1i:p:u:P:")) != -1) {
+	while((c = getopt(argc, argv, ":1bi:p:u:P:")) != -1) {
 		switch(c) {
 			case '1':
 				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				break;
+			case 'b':
+				bind_mode = 1;
 				break;
 			case 'u':
 				auth_user = strdup(optarg);
