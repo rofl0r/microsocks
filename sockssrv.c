@@ -40,7 +40,8 @@
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
-#ifndef PTHREAD_STACK_MIN
+#if !defined(PTHREAD_STACK_MIN) || defined(__APPLE__)
+/* MAC says its min is 8KB, but then crashes in our face. thx hunkOLard */
 #define PTHREAD_STACK_MIN 64*1024
 #endif
 
