@@ -22,6 +22,7 @@
 */
 
 #define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,8 +32,17 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <limits.h>
 #include "server.h"
 #include "sblist.h"
+
+#ifndef MAX
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+#endif
+
+#ifndef PTHREAD_STACK_MIN
+#define PTHREAD_STACK_MIN 64*1024
+#endif
 
 static const char* auth_user;
 static const char* auth_pass;
@@ -402,6 +412,8 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	server = &s;
+	size_t stacksz = MAX(8192, PTHREAD_STACK_MIN);  /* 4KB for us, 4KB for libc */
+
 	while(1) {
 		collect(threads);
 		struct client c;
@@ -421,7 +433,7 @@ int main(int argc, char** argv) {
 		pthread_attr_t *a = 0, attr;
 		if(pthread_attr_init(&attr) == 0) {
 			a = &attr;
-			pthread_attr_setstacksize(a, 8192); /* 4KB for us, 4KB for libc */
+			pthread_attr_setstacksize(a, stacksz);
 		}
 		if(pthread_create(&curr->pt, a, clientthread, curr) != 0)
 			dolog("pthread_create failed. OOM?\n");
