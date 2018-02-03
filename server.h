@@ -6,6 +6,7 @@
 
 #include <sys/socket.h>
 #include <netdb.h>
+#include <netinet/in.h>
 
 //RcB: DEP "server.c"
 
