@@ -214,9 +214,9 @@ static void add_auth_ip(struct client*client) {
 	pthread_mutex_unlock(&auth_ips_mutex);
 }
 
-static void send_auth_response(int fd, enum authmethod meth) {
+static void send_auth_response(int fd, int version, enum authmethod meth) {
 	unsigned char buf[2];
-	buf[0] = 5;
+	buf[0] = version;
 	buf[1] = meth;
 	write(fd, buf, 2);
 }
@@ -293,12 +293,12 @@ static void* clientthread(void *data) {
 				am = check_auth_method(buf, n, &t->client);
 				if(am == AM_NO_AUTH) t->state = SS_3_AUTHED;
 				else if (am == AM_USERNAME) t->state = SS_2_NEED_AUTH;
-				send_auth_response(t->client.fd, am);
+				send_auth_response(t->client.fd, 5, am);
 				if(am == AM_INVALID) goto breakloop;
 				break;
 			case SS_2_NEED_AUTH:
 				ret = check_credentials(buf, n);
-				send_auth_response(t->client.fd, ret);
+				send_auth_response(t->client.fd, 1, ret);
 				if(ret != EC_SUCCESS)
 					goto breakloop;
 				t->state = SS_3_AUTHED;
