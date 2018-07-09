@@ -42,7 +42,11 @@
 
 #if !defined(PTHREAD_STACK_MIN) || defined(__APPLE__)
 /* MAC says its min is 8KB, but then crashes in our face. thx hunkOLard */
+#undef PTHREAD_STACK_MIN
 #define PTHREAD_STACK_MIN 64*1024
+#elif defined(__GLIBC__)
+#undef PTHREAD_STACK_MIN
+#define PTHREAD_STACK_MIN 32*1024
 #endif
 
 static const char* auth_user;
