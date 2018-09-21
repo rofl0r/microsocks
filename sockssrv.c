@@ -279,6 +279,8 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 	char user[256], pass[256];
 	memcpy(user, buf+2, ulen);
 	memcpy(pass, buf+2+ulen+1, plen);
+	user[ulen] = 0;
+	pass[plen] = 0;
 	if(!strcmp(user, auth_user) && !strcmp(pass, auth_pass)) return EC_SUCCESS;
 	return EC_NOT_ALLOWED;
 }
