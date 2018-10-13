@@ -4,10 +4,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef PAGE_SIZE
-#warning "your C library sucks."
-#define PAGE_SIZE 4096
-#endif
+#define MY_PAGE_SIZE 4096
 
 sblist* sblist_new(size_t itemsize, size_t blockitems) {
 	sblist* ret = (sblist*) malloc(sizeof(sblist));
@@ -23,7 +20,7 @@ static void sblist_clear(sblist* l) {
 
 void sblist_init(sblist* l, size_t itemsize, size_t blockitems) {
 	if(l) {
-		l->blockitems = blockitems ? blockitems : PAGE_SIZE / itemsize;
+		l->blockitems = blockitems ? blockitems : MY_PAGE_SIZE / itemsize;
 		l->itemsize = itemsize;
 		sblist_clear(l);
 	}
