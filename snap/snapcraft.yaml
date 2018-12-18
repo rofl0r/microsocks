@@ -1,0 +1,24 @@
+name: microsocks
+version: '1.0.0'
+summary: tiny, portable SOCKS5 server with very moderate resource usage
+description: |
+  A SOCKS5 service that you can run on your remote boxes 
+  to tunnel connections through them, if for some reason SSH 
+  doesn't cut it for you.
+
+grade: stable
+confinement: strict
+
+apps:
+  microsocks:
+    command: usr/local/bin/microsocks
+    plugs: 
+      - network
+      - network-bind
+
+parts:
+  microsocks:
+    source: .
+    plugin: make
+    build-packages: 
+      - build-essential
