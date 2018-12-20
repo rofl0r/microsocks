@@ -137,6 +137,7 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	int fd = socket(remote->ai_addr->sa_family, SOCK_STREAM, 0);
 	if(fd == -1) {
 		eval_errno:
+		if(fd != -1) close(fd);
 		freeaddrinfo(remote);
 		switch(errno) {
 			case EPROTOTYPE:
