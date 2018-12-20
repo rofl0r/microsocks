@@ -140,6 +140,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		if(fd != -1) close(fd);
 		freeaddrinfo(remote);
 		switch(errno) {
+			case ETIMEDOUT:
+				return -EC_TTL_EXPIRED;
 			case EPROTOTYPE:
 			case EPROTONOSUPPORT:
 			case EAFNOSUPPORT:
