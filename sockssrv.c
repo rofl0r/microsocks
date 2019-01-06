@@ -133,7 +133,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	}
 	unsigned short port;
 	port = (buf[minlen-2] << 8) | buf[minlen-1];
-	if(resolve(namebuf, port, &remote)) return -9;
+	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
+	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
 	int fd = socket(remote->ai_addr->sa_family, SOCK_STREAM, 0);
 	if(fd == -1) {
 		eval_errno:
