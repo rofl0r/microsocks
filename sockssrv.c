@@ -29,7 +29,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <signal.h>
-#include <sys/select.h>
+#include <sys/epoll.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
@@ -49,6 +49,7 @@
 #define PTHREAD_STACK_MIN 32*1024
 #endif
 
+#define EPOLL_MAX_EVENTS (2)
 static const char* auth_user;
 static const char* auth_pass;
 static sblist* auth_ips;
@@ -237,39 +238,52 @@ static void send_error(int fd, enum errorcode ec) {
 }
 
 static void copyloop(int fd1, int fd2) {
-	int maxfd = fd2;
-	if(fd1 > fd2) maxfd = fd1;
-	fd_set fdsc, fds;
-	FD_ZERO(&fdsc);
-	FD_SET(fd1, &fdsc);
-	FD_SET(fd2, &fdsc);
+	struct epoll_event events[EPOLL_MAX_EVENTS];
+	int epollfd = epoll_create(2); // we'll watch 2 fds
+	struct epoll_event ev;
+	ev.events = EPOLLIN;
+
+	ev.data.fd = fd1;
+	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, ev.data.fd, &ev) == -1)
+		perror("epoll_ctl for fd1");
+
+	ev.data.fd = fd2;
+	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, ev.data.fd, &ev) == -1)
+		perror("epoll_ctl for fd2");
 
 	while(1) {
-		memcpy(&fds, &fdsc, sizeof(fds));
 		/* inactive connections are reaped after 15 min to free resources.
 		   usually programs send keep-alive packets so this should only happen
 		   when a connection is really unused. */
-		struct timeval timeout = {.tv_sec = 60*15, .tv_usec = 0};
-		switch(select(maxfd+1, &fds, 0, 0, &timeout)) {
+		int timeout = 15 * 60 * 1000; // 15mins in msec
+		int nevts = epoll_wait(epollfd, events, EPOLL_MAX_EVENTS, timeout);
+		switch(nevts) {
 			case 0:
 				send_error(fd1, EC_TTL_EXPIRED);
+				close(epollfd);
 				return;
 			case -1:
 				if(errno == EINTR) continue;
-				else perror("select");
+				else perror("epoll_wait");
+				close(epollfd);
 				return;
 		}
-		int infd = FD_ISSET(fd1, &fds) ? fd1 : fd2;
-		int outfd = infd == fd2 ? fd1 : fd2;
-		char buf[1024];
-		ssize_t sent = 0, n = read(infd, buf, sizeof buf);
-		if(n <= 0) return;
-		while(sent < n) {
-			ssize_t m = write(outfd, buf+sent, n-sent);
-			if(m < 0) return;
-			sent += m;
-		}
+		//We can process events in any order, right to left for now.
+		do {
+			int infd = events[nevts-1].data.fd;
+			int outfd = (infd == fd2) ? fd1 : fd2;
+			char buf[1024];
+			ssize_t sent = 0, n = read(infd, buf, sizeof buf);
+			if(n <= 0) { close(epollfd); return; }
+			while(sent < n) {
+				ssize_t m = write(outfd, buf+sent, n-sent);
+				if(m < 0) { close(epollfd); return; }
+				sent += m;
+			}
+			nevts--;
+		} while (nevts > 0);
 	}
+	close(epollfd);
 }
 
 static enum errorcode check_credentials(unsigned char* buf, size_t n) {
