@@ -29,7 +29,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <signal.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
@@ -237,37 +237,41 @@ static void send_error(int fd, enum errorcode ec) {
 }
 
 static void copyloop(int fd1, int fd2) {
-	int maxfd = fd2;
-	if(fd1 > fd2) maxfd = fd1;
-	fd_set fdsc, fds;
-	FD_ZERO(&fdsc);
-	FD_SET(fd1, &fdsc);
-	FD_SET(fd2, &fdsc);
+	struct pollfd pollfds[2];
+
+	pollfds[0].fd = fd1;
+	pollfds[0].events = POLLIN;
+
+	pollfds[1].fd = fd2;
+	pollfds[1].events = POLLIN;
 
 	while(1) {
-		memcpy(&fds, &fdsc, sizeof(fds));
 		/* inactive connections are reaped after 15 min to free resources.
 		   usually programs send keep-alive packets so this should only happen
 		   when a connection is really unused. */
-		struct timeval timeout = {.tv_sec = 60*15, .tv_usec = 0};
-		switch(select(maxfd+1, &fds, 0, 0, &timeout)) {
+		int timeout = 15 * 60 * 1000; // 15mins in msec
+		switch(poll(pollfds, 2, timeout)) {
 			case 0:
 				send_error(fd1, EC_TTL_EXPIRED);
 				return;
 			case -1:
 				if(errno == EINTR) continue;
-				else perror("select");
+				else perror("poll");
 				return;
 		}
-		int infd = FD_ISSET(fd1, &fds) ? fd1 : fd2;
-		int outfd = infd == fd2 ? fd1 : fd2;
-		char buf[1024];
-		ssize_t sent = 0, n = read(infd, buf, sizeof buf);
-		if(n <= 0) return;
-		while(sent < n) {
-			ssize_t m = write(outfd, buf+sent, n-sent);
-			if(m < 0) return;
-			sent += m;
+		for (int i = 0; i < 2; i++) {
+			if (pollfds[i].revents & POLLIN) {
+				int infd = pollfds[i].fd;
+				int outfd = (infd == fd2) ? fd1 : fd2;
+				char buf[1024];
+				ssize_t sent = 0, n = read(infd, buf, sizeof buf);
+				if(n <= 0) return;
+				while(sent < n) {
+					ssize_t m = write(outfd, buf+sent, n-sent);
+					if(m < 0) return;
+					sent += m;
+				}
+			}
 		}
 	}
 }
