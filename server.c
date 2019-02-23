@@ -14,9 +14,20 @@ int resolve(const char *host, unsigned short port, struct addrinfo** addr) {
 	return getaddrinfo(host, port_buf, &hints, addr);
 }
 
-int server_bindtoip(const struct server *server, int fd) {
-	if(server->bindaddr.v4.sin_family != AF_UNSPEC)
-		return bind(fd, (struct sockaddr*) &server->bindaddr, server->bindaddrsz);
+int resolve_sa(const char *host, unsigned short port, union sockaddr_union *res) {
+	struct addrinfo *ainfo = 0;
+	int ret;
+	SOCKADDR_UNION_AF(res) = AF_UNSPEC;
+	if((ret = resolve(host, port, &ainfo))) return ret;
+	memcpy(res, ainfo->ai_addr, ainfo->ai_addrlen);
+	freeaddrinfo(ainfo);
+	return 0;
+}
+
+int bindtoip(int fd, union sockaddr_union *bindaddr) {
+	socklen_t sz = SOCKADDR_UNION_LENGTH(bindaddr);
+	if(sz)
+		return bind(fd, (struct sockaddr*) bindaddr, sz);
 	return 0;
 }
 
@@ -29,7 +40,7 @@ int server_setup(struct server *server, const char* listenip, unsigned short por
 	struct addrinfo *ainfo = 0;
 	if(resolve(listenip, port, &ainfo)) return -1;
 	struct addrinfo* p;
-	int listenfd;
+	int listenfd = -1;
 	for(p = ainfo; p; p = p->ai_next) {
 		if((listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
 			continue;
@@ -49,10 +60,5 @@ int server_setup(struct server *server, const char* listenip, unsigned short por
 		return -3;
 	}
 	server->fd = listenfd;
-	if(!resolve(listenip, 0, &ainfo)) {
-		server->bindaddrsz = ainfo->ai_addrlen;
-		memcpy(&server->bindaddr, ainfo->ai_addr, ainfo->ai_addrlen);
-		freeaddrinfo(ainfo);
-	} else server->bindaddr.v4.sin_family = AF_UNSPEC;
 	return 0;
 }
