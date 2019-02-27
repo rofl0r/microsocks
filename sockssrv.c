@@ -168,8 +168,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	freeaddrinfo(remote);
 	if(CONFIG_LOG) {
 		char clientname[256];
-		af = client->addr.v4.sin_family;
-		void *ipdata = af == AF_INET ? (void*)&client->addr.v4.sin_addr : (void*)&client->addr.v6.sin6_addr;
+		af = SOCKADDR_UNION_AF(&client->addr);
+		void *ipdata = SOCKADDR_UNION_ADDRESS(&client->addr);
 		inet_ntop(af, ipdata, clientname, sizeof clientname);
 		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
 	}
@@ -177,11 +177,11 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 }
 
 static int is_authed(union sockaddr_union *client, union sockaddr_union *authedip) {
-	if(authedip->v4.sin_family == client->v4.sin_family) {
-		int af = authedip->v4.sin_family;
+	int af = SOCKADDR_UNION_AF(authedip);
+	if(af == SOCKADDR_UNION_AF(client)) {
 		size_t cmpbytes = af == AF_INET ? 4 : 16;
-		void *cmp1 = af == AF_INET ? (void*)&client->v4.sin_addr : (void*)&client->v6.sin6_addr;
-		void *cmp2 = af == AF_INET ? (void*)&authedip->v4.sin_addr : (void*)&authedip->v6.sin6_addr;
+		void *cmp1 = SOCKADDR_UNION_ADDRESS(client);
+		void *cmp2 = SOCKADDR_UNION_ADDRESS(authedip);
 		if(!memcmp(cmp1, cmp2, cmpbytes)) return 1;
 	}
 	return 0;
