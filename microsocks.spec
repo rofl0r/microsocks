@@ -11,6 +11,9 @@ Source0:        %{name}-%{version}.tar.gz
 BuildRequires:  gcc
 BuildRequires:  make
 BuildRequires:  systemd
+BuildRequires:  autoconf
+BuildRequires:  automake
+BuildRequires:  autoconf-archive
 Requires:       glibc
 Requires:       systemd
 
