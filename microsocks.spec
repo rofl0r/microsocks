@@ -54,7 +54,7 @@ rm -rf %{buildroot}
 
 
 %changelog
-* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com>
+* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.1-1
 - First release
 - Transition to GNU Autotools
 - Update usage message
