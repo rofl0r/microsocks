@@ -1,5 +1,5 @@
 Name:           microsocks
-Version:        1.0.1
+Version:        1.0.2
 Release:        1%{?dist}
 Summary:        Lightweight socks5 server
 
@@ -54,7 +54,7 @@ rm -rf %{buildroot}
 
 
 %changelog
-* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.1-1
+* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.2-1
 - First release
 - Transition to GNU Autotools
 - Update usage message
