@@ -135,15 +135,21 @@ Service usage examples
 
 - Start the service
 
+    ```
     systemctl start microsocks.service
+    ```
 
 - Stop the service
-
+    
+    ```
     systemctl stop microsocks.service
+    ```
 
 - Check service status
 
+    ```
     systemctl status microsocks.service
+    ```
 
 - Change service options
 
