@@ -1,0 +1,36 @@
+name: Build / Release
+
+on:
+  push:
+    branches: 
+      - master
+    tags:
+      - "v*"
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: install prereqs
+      run: sudo apt install autoconf-archive mock
+    - name: autogen
+      run: ./autogen.sh
+    - name: configure
+      run: ./configure
+    - name: make
+      run: make
+    - name: make distribution source tarball
+      run: make dist
+    - name: build srpm
+      run: sudo mock -r epel-7-x86_64 --buildsrpm --spec microsocks.spec --sources . --resultdir=/tmp/results
+    - name: build rpm
+      run: sudo mock -r epel-7-x86_64 --rebuild /tmp/results/*.src.rpm --resultdir=/tmp/results
+    - name: Upload Release
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        files: /tmp/results/*.rpm
