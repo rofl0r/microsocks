@@ -1,7 +1,7 @@
 MicroSocks - multithreaded, small, efficient SOCKS5 server.
 ===========================================================
 
-a SOCKS5 service that you can run on your remote boxes to tunnel connections
+A SOCKS5 service that you can run on your remote boxes to tunnel connections
 through them, if for some reason SSH doesn't cut it for you.
 
 It's very lightweight, and very light on resources too:
@@ -38,17 +38,118 @@ like 10 KB static linked when only ipv4 support is enabled.
 still, if optimized for size, *this* program when static linked against musl
 libc is not even 50 KB. that's easily usable even on the cheapest routers.
 
-command line options
+Build
 ------------------------
 
-    microsocks -1 -i listenip -p port -u user -P password -b bindaddr
+To build the microsocks from source
 
-all arguments are optional.
-by default listenip is 0.0.0.0 and port 1080.
+1. Install dependencies
 
-option -1 activates auth_once mode: once a specific ip address
-authed successfully with user/pass, it is added to a whitelist
-and may use the proxy without auth.
-this is handy for programs like firefox that don't support
-user/pass auth. for it to work you'd basically make one connection
-with another program that supports it, and then you can use firefox too.
+    We need the autotools and autotool-archive as dependencies, in a CentOS/RHEL system this can be installed as follows
+    
+    ```
+    yum install autoconf automake autotools-archive
+    ```
+
+1. Build
+
+    ```
+    ./autogen.sh
+    ./configure
+    make
+    ```
+
+2. Create distribution tarball
+
+    ```
+    make dist
+    ```
+
+3. [Optional] Test Installation
+
+    ```
+    make distcheck
+    ```
+
+Build rpm package
+------------------------
+We can use the [tito project](https://github.com/dgoodwin/tito) to build an rpm from the git repo directly as follows.
+
+1. Install Dependencies
+
+    ```
+    yum install tito
+    ```
+
+1. Run tito in test mode
+
+    ```
+    tito --rpm --offline --test
+    ```
+
+1. Run tito after making changes and checking in code
+
+    ```
+    tito tag
+    tito build --rpm
+    ```
+    
+Usage
+------------------------
+```
+Usage:
+  microsocks [options]
+Options:
+  -b            Bind outgoing connections to the listening ip
+                (defined by -i)
+
+  -i <ip addr>  The ip address the server listens to for connections
+                (default: 0.0.0.0)
+
+  -p <port num> The port the server listens to for connections
+                (default: 1080)
+
+  -u <username> Authentication username, used to auth proxy clients
+                (default: not set)
+
+  -P <password> Authentication password, used to auth proxy clients
+                (default: not set)
+                
+  -1            Activates auth_once mode. 
+                Once a specific ip address successfully authenticates with 
+                user/pass, it is added to a whitelist and may use the proxy
+                without auth.
+                This is handy for programs like firefox that don't support 
+                user/pass auth. for it to work you'd basically make one 
+                connection with another program that supports it, and then 
+                you can use firefox too.
+                (default: disabled)
+```
+
+Systemd
+------------------------
+
+Systemd support will automatically be enabled if support is detected during the build. When enabled a service unit will be installed in `/usr/lib/systemd/system/microsocks.service`.
+
+Service usage examples
+
+- Start the service
+
+    systemctl start microsocks.service
+
+- Stop the service
+
+    systemctl stop microsocks.service
+
+- Check service status
+
+    systemctl status microsocks.service
+
+- Change service options
+
+    The command line arguments the service will use when started are defined in `/etc/sysconfig/microsocks`
+
+    To change the options edit the file and restart the service.
+
+
+
