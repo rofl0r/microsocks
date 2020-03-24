@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: Build / Release
 
 on:
   push:
@@ -29,9 +29,9 @@ jobs:
       run: sudo apt install mock tito
     - name: build rpm
       run: tito build --builder mock --arg mock=epel-7-x86_64 --rpm --output /tmp/results --dist ".el7"
-    - name: Update release
-      uses: johnwbyrd/update-release@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        files: ./tmp/results/*.rpm
-
+    - name: Upload release
+    - uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: /tmp/results/*.rpm
