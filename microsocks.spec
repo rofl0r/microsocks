@@ -1,6 +1,6 @@
 Name:           microsocks
 Version:        1.0.2
-Release:        2%{?dist}
+Release:        4%{?dist}
 Summary:        Lightweight socks5 server
 
 Group:          Applications/Internet
@@ -57,6 +57,15 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.2-4
+- update ci to create rpm (firas.alshafei@us.abb.com)
+
+* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com>
+- 
+
+* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com>
+- 
+
 * Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.2-2
 - missing build reqs (firas.alshafei@us.abb.com)
 - fixed readme bug (firas.alshafei@us.abb.com)
