@@ -30,7 +30,7 @@ jobs:
     - name: build rpm
       run: tito build --builder mock --arg mock=epel-7-x86_64 --rpm --output /tmp/results --dist ".el7"
     - name: Upload release
-    - uses: "marvinpinto/action-automatic-releases@latest"
+      uses: "marvinpinto/action-automatic-releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
