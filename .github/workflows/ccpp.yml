@@ -24,7 +24,7 @@ jobs:
     - name: make distribution source tarball
       run: make dist
     - name: configure user
-      run: sudo usermod -a -G $USER mock
+      run: sudo usermod -a -G mock $USER
     - name: build srpm
       run: mock -r epel-7-x86_64 --buildsrpm --spec microsocks.spec --sources . --resultdir=/tmp/results
     - name: build rpm
