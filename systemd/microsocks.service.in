@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=microsocks
 EnvironmentFile=-/etc/sysconfig/microsocks
 ExecStart=@prefix@/bin/microsocks ${ARGS}
 KillMode=process
