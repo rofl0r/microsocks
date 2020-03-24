@@ -26,7 +26,14 @@ jobs:
     - name: make distcheck
       run: make distcheck
     - name: install mock
-      run: sudo apt install mock tito
+      run: sudo apt install mock
+    - name: install tito
+      run: |
+          git clone https://github.com/dgoodwin/tito.git
+          cd tito/
+          sudo yum install python-setuptools
+          ./setup.py build
+          sudo ./setup.py install
     - name: build rpm
       run: tito build --builder mock --arg mock=epel-7-x86_64 --rpm --output /tmp/results --dist ".el7"
     - name: Upload Release
