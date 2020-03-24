@@ -1,5 +1,6 @@
 MicroSocks - multithreaded, small, efficient SOCKS5 server.
 ===========================================================
+![Build / Release](https://github.com/OnceUponALoop/microsocks/workflows/Build%20/%20Release/badge.svg?branch=master)
 
 A SOCKS5 service that you can run on your remote boxes to tunnel connections
 through them, if for some reason SSH doesn't cut it for you.
@@ -89,9 +90,40 @@ We can use the [tito project](https://github.com/dgoodwin/tito) to build an rpm 
 
 1. Run tito after making changes and checking in code
 
-    ```
+    ``` bash
     tito tag
     tito build --rpm
+    ```
+
+    We can also use tito to chain into mock to create rpms for other dists.
+
+    ``` bash
+    tito build                 \
+      --rpm                    \
+      --builder mock           \
+      --arg mock=epel-7-x86_64 \
+      --output /tmp/results
+    ```
+
+1. Run mock to generate rpm for other distributions
+
+    Github Actions doesn't support Fedora variants so we're unable to use tito but we can still
+    leverage mock for multiple-dist support by calling it directly
+
+    ``` bash
+    # Create SRPM
+    mock                     \
+      -r epel-7-x86_64       \
+      --buildsrpm            \
+      --spec microsocks.spec \
+      --sources .            \
+      --resultdir=/tmp/results
+
+    # Create RPM
+    mock \
+      -r epel-7-x86_64 \
+      --rebuild /tmp/results/*.src.rpm  \
+      --resultdir=/tmp/results
     ```
     
 Usage
