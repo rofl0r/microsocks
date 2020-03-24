@@ -1,6 +1,6 @@
 Name:           microsocks
 Version:        1.0.1
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Lightweight socks5 server
 
 Group:          Applications/Internet
@@ -32,6 +32,17 @@ make %{?_smp_mflags}
 %check
 make check
 
+%pre
+# Create microsocks user/group 
+# TODO: control user via configure build flag
+getent group microsocks  >/dev/null || groupadd -r microsocks
+getent passwd microsocks >/dev/null || \
+    useradd --system --gid microsocks --shell /sbin/nologin \
+    --comment "microsocks service account" --no-create-home \
+    microsocks
+exit 0
+
+
 %install
 rm -rf %{buildroot}
 make install-strip DESTDIR=%{buildroot}
@@ -57,6 +68,10 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Tue Mar 24 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.1-3
+- Create microsocks nologin service user
+- Update systemd unit to run as service user
+
 * Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.1-2
 - First release
 - Transition to GNU Autotools
