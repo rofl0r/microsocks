@@ -31,7 +31,7 @@ jobs:
       run: |
           git clone https://github.com/dgoodwin/tito.git
           cd tito/
-          sudo yum install python-setuptools
+          sudo apt install python-setuptools
           ./setup.py build
           sudo ./setup.py install
     - name: build rpm
