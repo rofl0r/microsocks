@@ -1,3 +1,18 @@
 *.o
 *.out
 
+# Ignore autoreconf generated
+autom4te.cache
+aclocal.m4
+config
+configure
+Makefile
+Makefile.in
+src/Makefile.in
+
+# Ignore configure generated
+config
+config.log
+config.status
+src/.deps
+systemd/microsocks.service

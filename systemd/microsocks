@@ -1,0 +1,14 @@
+# microsocks daemon options
+#
+# Examples
+# ---------
+# Use specified IP address to listen
+# OPTIONS="-i 192.168.1.10"
+#
+# Use specific IP and Port
+# OPTIONS="-i 192.168.1.10 -p 8080"
+#
+# Set Username/Password
+# OPTIONS="-u myuser -P mypassword"
+# 
+OPTIONS=""
