@@ -1,5 +1,9 @@
+# Ignore build output
 *.o
 *.out
+
+# Ignore make dist output
+microsocks-*.tar.gz
 
 # Ignore autoreconf generated
 autom4te.cache
