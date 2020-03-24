@@ -3,7 +3,9 @@ SUBDIRS = src . systemd
 
 # Keep support files
 EXTRA_DIST = clean.sh \
-             autogen.sh
+             autogen.sh \
+             LICENSE \
+             README.md
 
 # Handle Systemd
 DISTCHECK_CONFIGURE_FLAGS = \
