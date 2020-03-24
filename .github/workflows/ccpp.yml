@@ -2,9 +2,10 @@ name: Build / Release
 
 on:
   push:
-    branches: [ master ]
+    branches: 
+      - master
     tags:
-        - "v*"
+      - "v*"
 
 jobs:
   build:
