@@ -1,6 +1,6 @@
 Name:           microsocks
-Version:        1.0.2
-Release:        4%{?dist}
+Version:        1.0.3
+Release:        1%{?dist}
 Summary:        Lightweight socks5 server
 
 Group:          Applications/Internet
@@ -57,6 +57,9 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.3-1
+- test release upload (firas.alshafei@us.abb.com)
+
 * Mon Mar 23 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.2-4
 - update ci to create rpm (firas.alshafei@us.abb.com)
 
