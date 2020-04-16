@@ -1,6 +1,6 @@
 Name:           microsocks
 Version:        1.0.1
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Lightweight socks5 server
 
 Group:          Applications/Internet
@@ -68,6 +68,9 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Tue Mar 25 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.1-3
+- Support for nologin user
+
 * Tue Mar 25 2020 OnceUponALoop <firas.alshafei@us.abb.com> 1.0.1-3
 - Fix bug in systemd unit file not sourcing sysconfig arguments
 

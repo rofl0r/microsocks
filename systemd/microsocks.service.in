@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=microsocks
 EnvironmentFile=-/etc/sysconfig/microsocks
-ExecStart=@prefix@/bin/microsocks ${OPTIONS}
+ExecStart=@SHELL@ -c '/usr/bin/microsocks ${OPTIONS}'
 KillMode=process
 Restart=on-failure
-RestartSec=42s
+RestartSec=30s
 
 [Install]
 WantedBy=multi-user.target
