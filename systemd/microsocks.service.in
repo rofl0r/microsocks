@@ -1,0 +1,16 @@
+[Unit]
+Description=microsocks - lightweight socks5 server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=microsocks
+EnvironmentFile=-/etc/sysconfig/microsocks
+ExecStart=@SHELL@ -c '/usr/bin/microsocks ${OPTIONS}'
+KillMode=process
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target

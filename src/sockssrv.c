@@ -352,21 +352,31 @@ static void collect(sblist *threads) {
 }
 
 static int usage(void) {
-	dprintf(2,
-		"MicroSocks SOCKS5 Server\n"
-		"------------------------\n"
-		"usage: microsocks -1 -i listenip -p port -u user -P password -b bindaddr\n"
-		"all arguments are optional.\n"
-		"by default listenip is 0.0.0.0 and port 1080.\n\n"
-		"option -b specifies which ip outgoing connections are bound to\n"
-		"option -1 activates auth_once mode: once a specific ip address\n"
-		"authed successfully with user/pass, it is added to a whitelist\n"
-		"and may use the proxy without auth.\n"
-		"this is handy for programs like firefox that don't support\n"
-		"user/pass auth. for it to work you'd basically make one connection\n"
-		"with another program that supports it, and then you can use firefox too.\n"
-	);
-	return 1;
+    dprintf(2,
+        "Usage:\n"
+        "  microsocks [options]\n\n"
+        "Options:\n"
+        "  -b            Bind outgoing connections to the listening ip\n"
+        "                (defined by -i)\n\n"
+        "  -i <ip addr>  The ip address the server listens to for connections\n"
+        "                (default: 0.0.0.0)\n\n"
+        "  -p <port num> The port the server listens to for connections\n"
+        "                (default: 1080)\n\n"
+        "  -u <username> Authentication username, used to auth proxy clients\n"
+        "                (default: not set)\n\n"
+        "  -P <password> Authentication password, used to auth proxy clients\n"
+        "                (default: not set)\n\n"
+        "  -1            Activates auth_once mode.\n"
+        "                Once a specific ip address successfully authenticates with \n"
+        "                user/pass, it is added to a whitelist and may use the proxy\n"
+        "                without auth.\n\n"
+        "                This is handy for programs like firefox that don't support \n"
+        "                user/pass auth. for it to work you'd basically make one \n"
+        "                connection with another program that supports it, and then \n"
+        "                you can use firefox too.\n"
+        "                (default: disabled)\n"
+    );
+    return 1;
 }
 
 /* prevent username and password from showing up in top. */
