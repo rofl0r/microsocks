@@ -376,11 +376,11 @@ static void zero_arg(char *s) {
 }
 
 int main(int argc, char** argv) {
-	int c;
+	int ch;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
-	while((c = getopt(argc, argv, ":1b:i:p:u:P:")) != -1) {
-		switch(c) {
+	while((ch = getopt(argc, argv, ":1b:i:p:u:P:")) != -1) {
+		switch(ch) {
 			case '1':
 				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
 				break;
@@ -403,6 +403,7 @@ int main(int argc, char** argv) {
 				break;
 			case ':':
 				dprintf(2, "error: option -%c requires an operand\n", optopt);
+				/* fall through */
 			case '?':
 				return usage();
 		}
