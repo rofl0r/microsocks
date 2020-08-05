@@ -4,11 +4,11 @@
 #include <unistd.h>
 
 int resolve(const char *host, unsigned short port, struct addrinfo** addr) {
-	struct addrinfo hints = {
-		.ai_family = AF_UNSPEC,
-		.ai_socktype = SOCK_STREAM,
-		.ai_flags = AI_PASSIVE,
-	};
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
 	char port_buf[8];
 	snprintf(port_buf, sizeof port_buf, "%u", port);
 	return getaddrinfo(host, port_buf, &hints, addr);
