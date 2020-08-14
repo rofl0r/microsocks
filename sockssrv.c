@@ -40,13 +40,18 @@
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
-#if !defined(PTHREAD_STACK_MIN) || defined(__APPLE__)
-/* MAC says its min is 8KB, but then crashes in our face. thx hunkOLard */
-#undef PTHREAD_STACK_MIN
-#define PTHREAD_STACK_MIN 64*1024
+#ifdef PTHREAD_STACK_MIN
+#define THREAD_STACK_SIZE MAX(8*1024, PTHREAD_STACK_MIN)
+#else
+#define THREAD_STACK_SIZE 64*1024
+#endif
+
+#if defined(__APPLE__)
+#undef THREAD_STACK_SIZE
+#define THREAD_STACK_SIZE 64*1024
 #elif defined(__GLIBC__) || defined(__FreeBSD__)
-#undef PTHREAD_STACK_MIN
-#define PTHREAD_STACK_MIN 32*1024
+#undef THREAD_STACK_SIZE
+#define THREAD_STACK_SIZE 32*1024
 #endif
 
 static const char* auth_user;
@@ -424,7 +429,6 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	server = &s;
-	size_t stacksz = MAX(8192, PTHREAD_STACK_MIN);  /* 4KB for us, 4KB for libc */
 
 	while(1) {
 		collect(threads);
@@ -445,7 +449,7 @@ int main(int argc, char** argv) {
 		pthread_attr_t *a = 0, attr;
 		if(pthread_attr_init(&attr) == 0) {
 			a = &attr;
-			pthread_attr_setstacksize(a, stacksz);
+			pthread_attr_setstacksize(a, THREAD_STACK_SIZE);
 		}
 		if(pthread_create(&curr->pt, a, clientthread, curr) != 0)
 			dolog("pthread_create failed. OOM?\n");
