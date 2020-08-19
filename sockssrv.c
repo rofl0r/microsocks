@@ -60,6 +60,7 @@ static sblist* auth_ips;
 static pthread_mutex_t auth_ips_mutex = PTHREAD_MUTEX_INITIALIZER;
 static const struct server* server;
 static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
+static const char* bind_interface;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -165,6 +166,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
+	if(bind_interface && setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, bind_interface, strlen(bind_interface)) == -1)
+		goto eval_errno;
 	if(SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC && bindtoip(fd, &bind_addr) == -1)
 		goto eval_errno;
 	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
@@ -384,13 +387,17 @@ int main(int argc, char** argv) {
 	int ch;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1b:i:p:u:P:")) != -1) {
+	while((ch = getopt(argc, argv, ":1b:B:i:p:u:P:")) != -1) {
 		switch(ch) {
 			case '1':
 				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
 				break;
 			case 'b':
 				resolve_sa(optarg, 0, &bind_addr);
+				break;
+			case 'B':
+				bind_interface = strdup(optarg);
+				zero_arg(optarg);
 				break;
 			case 'u':
 				auth_user = strdup(optarg);
