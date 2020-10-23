@@ -57,7 +57,7 @@
 static const char* auth_user;
 static const char* auth_pass;
 static sblist* auth_ips;
-static pthread_mutex_t auth_ips_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
 static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
 
@@ -214,10 +214,11 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct cl
 		if(buf[idx] == AM_NO_AUTH) {
 			if(!auth_user) return AM_NO_AUTH;
 			else if(auth_ips) {
-				int authed;
-				pthread_mutex_lock(&auth_ips_mutex);
-				authed = is_in_authed_list(&client->addr);
-				pthread_mutex_unlock(&auth_ips_mutex);
+				int authed = 0;
+				if(pthread_rwlock_rdlock(&auth_ips_lock) == 0) {
+					authed = is_in_authed_list(&client->addr);
+					pthread_rwlock_unlock(&auth_ips_lock);
+				}
 				if(authed) return AM_NO_AUTH;
 			}
 		} else if(buf[idx] == AM_USERNAME) {
@@ -319,11 +320,10 @@ static void* clientthread(void *data) {
 				if(ret != EC_SUCCESS)
 					goto breakloop;
 				t->state = SS_3_AUTHED;
-				if(auth_ips) {
-					pthread_mutex_lock(&auth_ips_mutex);
+				if(auth_ips && !pthread_rwlock_wrlock(&auth_ips_lock)) {
 					if(!is_in_authed_list(&t->client.addr))
 						add_auth_ip(&t->client.addr);
-					pthread_mutex_unlock(&auth_ips_mutex);
+					pthread_rwlock_unlock(&auth_ips_lock);
 				}
 				break;
 			case SS_3_AUTHED:
