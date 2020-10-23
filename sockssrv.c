@@ -192,6 +192,18 @@ static int is_authed(union sockaddr_union *client, union sockaddr_union *authedi
 	return 0;
 }
 
+static int is_in_authed_list(union sockaddr_union *caddr) {
+	size_t i;
+	for(i=0;i<sblist_getsize(auth_ips);i++)
+		if(is_authed(caddr, sblist_get(auth_ips, i)))
+			return 1;
+	return 0;
+}
+
+static void add_auth_ip(union sockaddr_union *caddr) {
+	sblist_add(auth_ips, caddr);
+}
+
 static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct client*client) {
 	if(buf[0] != 5) return AM_INVALID;
 	size_t idx = 1;
@@ -202,13 +214,9 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct cl
 		if(buf[idx] == AM_NO_AUTH) {
 			if(!auth_user) return AM_NO_AUTH;
 			else if(auth_ips) {
-				size_t i;
-				int authed = 0;
+				int authed;
 				pthread_mutex_lock(&auth_ips_mutex);
-				for(i=0;i<sblist_getsize(auth_ips);i++) {
-					if((authed = is_authed(&client->addr, sblist_get(auth_ips, i))))
-						break;
-				}
+				authed = is_in_authed_list(&client->addr);
 				pthread_mutex_unlock(&auth_ips_mutex);
 				if(authed) return AM_NO_AUTH;
 			}
@@ -219,12 +227,6 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct cl
 		n_methods--;
 	}
 	return AM_INVALID;
-}
-
-static void add_auth_ip(struct client*client) {
-	pthread_mutex_lock(&auth_ips_mutex);
-	sblist_add(auth_ips, &client->addr);
-	pthread_mutex_unlock(&auth_ips_mutex);
 }
 
 static void send_auth_response(int fd, int version, enum authmethod meth) {
@@ -317,7 +319,12 @@ static void* clientthread(void *data) {
 				if(ret != EC_SUCCESS)
 					goto breakloop;
 				t->state = SS_3_AUTHED;
-				if(auth_ips) add_auth_ip(&t->client);
+				if(auth_ips) {
+					pthread_mutex_lock(&auth_ips_mutex);
+					if(!is_in_authed_list(&t->client.addr))
+						add_auth_ip(&t->client.addr);
+					pthread_mutex_unlock(&auth_ips_mutex);
+				}
 				break;
 			case SS_3_AUTHED:
 				ret = connect_socks_target(buf, n, &t->client);
