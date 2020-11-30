@@ -23,9 +23,13 @@ jobs:
     - name: make distribution source tarball
       run: make dist
     - name: build srpm
+      run: sudo mock -r epel-7-x86_64 --buildsrpm --spec microsocks.spec --sources . --resultdir=/tmp/results
+    - name: build rpm
+      run: sudo mock -r epel-7-x86_64 --rebuild /tmp/results/*el7*.src.rpm --resultdir=/tmp/results
+    - name: build srpm
       run: sudo mock -r epel-8-x86_64 --buildsrpm --spec microsocks.spec --sources . --resultdir=/tmp/results
     - name: build rpm
-      run: sudo mock -r epel-8-x86_64 --rebuild /tmp/results/*.src.rpm --resultdir=/tmp/results
+      run: sudo mock -r epel-8-x86_64 --rebuild /tmp/results/*el8*.src.rpm --resultdir=/tmp/results
     - name: Upload Release
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
