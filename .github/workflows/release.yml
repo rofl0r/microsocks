@@ -21,7 +21,7 @@ jobs:
         packages: |
           mock
     - name: install prereqs
-      run: sudo apt install autoconf-archive mock
+      run: sudo apt install autoconf-archive
     - name: autogen
       run: ./autogen.sh
     - name: configure
