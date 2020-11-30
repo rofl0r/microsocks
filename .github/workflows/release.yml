@@ -11,7 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Install Python
+      uses: actions/setup-python@v1
+    - name: Install Mock
+      uses: BSFishy/pip-action@v1
+      with:
+        packages: |
+          mock
     - name: install prereqs
       run: sudo apt install autoconf-archive mock
     - name: autogen
