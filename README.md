@@ -52,3 +52,7 @@ and may use the proxy without auth.
 this is handy for programs like firefox that don't support
 user/pass auth. for it to work you'd basically make one connection
 with another program that supports it, and then you can use firefox too.
+for example, authenticate once using curl:
+
+    curl --socks5 user:password@listenip:port anyurl
+
