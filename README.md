@@ -39,7 +39,7 @@ still, if optimized for size, *this* program when static linked against musl
 libc is not even 50 KB. that's easily usable even on the cheapest routers.
 
 command line options
-------------------------
+--------------------
 
     microsocks -1 -i listenip -p port -u user -P password -b bindaddr
 
@@ -55,4 +55,11 @@ with another program that supports it, and then you can use firefox too.
 for example, authenticate once using curl:
 
     curl --socks5 user:password@listenip:port anyurl
+
+
+Supported SOCKS5 Features
+-------------------------
+- authentication: none, password, one-time
+- IPv4, IPv6, DNS
+- TCP (no UDP at this time)
 
