@@ -41,7 +41,7 @@ libc is not even 50 KB. that's easily usable even on the cheapest routers.
 command line options
 --------------------
 
-    microsocks -1 -i listenip -p port -u user -P password -b bindaddr
+    microsocks -1 -i listenip -p port -u user -P password -b bindaddr -B bindiface
 
 all arguments are optional.
 by default listenip is 0.0.0.0 and port 1080.
