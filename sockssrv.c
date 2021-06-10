@@ -54,6 +54,10 @@
 #define THREAD_STACK_SIZE 32*1024
 #endif
 
+#if defined(SOMARK)
+int somark;  /* mark outgoing connections' packets for adv. routing */
+#endif
+
 static const char* auth_user;
 static const char* auth_pass;
 static sblist* auth_ips;
@@ -167,6 +171,11 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	}
 	if(SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC && bindtoip(fd, &bind_addr) == -1)
 		goto eval_errno;
+#if defined(SOMARK)
+	if(somark != 0) {
+		setsockopt(fd, SOL_SOCKET, SO_MARK, &somark, sizeof(somark));
+	}
+#endif
 	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
 		goto eval_errno;
 
@@ -364,10 +373,16 @@ static int usage(void) {
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
 		"usage: microsocks -1 -i listenip -p port -u user -P password -b bindaddr\n"
+#if defined(SOMARK)
+		"                  -m mark\n"
+#endif
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -b specifies which ip outgoing connections are bound to\n"
 		"option -1 activates auth_once mode: once a specific ip address\n"
+#if defined(SOMARK)
+		"option -m marks outgoing connections' packets with specified SO_MARK id\n"
+#endif
 		"authed successfully with user/pass, it is added to a whitelist\n"
 		"and may use the proxy without auth.\n"
 		"this is handy for programs like firefox that don't support\n"
@@ -387,6 +402,9 @@ int main(int argc, char** argv) {
 	int ch;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
+#if defined(SOMARK)
+	somark = 0;
+#endif
 	while((ch = getopt(argc, argv, ":1b:i:p:u:P:")) != -1) {
 		switch(ch) {
 			case '1':
@@ -409,6 +427,11 @@ int main(int argc, char** argv) {
 			case 'p':
 				port = atoi(optarg);
 				break;
+#if defined(SOMARK)
+			case 'm':
+			    somark = atoi(optarg);
+				break;
+#endif
 			case ':':
 				dprintf(2, "error: option -%c requires an operand\n", optopt);
 				/* fall through */
