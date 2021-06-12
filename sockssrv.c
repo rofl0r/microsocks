@@ -404,8 +404,10 @@ int main(int argc, char** argv) {
 	unsigned port = 1080;
 #if defined(SOMARK)
 	somark = 0;
-#endif
+	while((ch = getopt(argc, argv, ":1b:i:m:p:u:P:")) != -1) {
+#else
 	while((ch = getopt(argc, argv, ":1b:i:p:u:P:")) != -1) {
+#endif
 		switch(ch) {
 			case '1':
 				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
