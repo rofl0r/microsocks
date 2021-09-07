@@ -12,13 +12,14 @@ LIBS = -lpthread
 
 CFLAGS += -Wall -std=c99
 
+INSTALL = ./install.sh
+
 -include config.mak
 
 all: $(PROG)
 
 install: $(PROG)
-	install -d $(DESTDIR)/$(bindir)
-	install -D -m 755 $(PROG) $(DESTDIR)/$(bindir)/$(PROG)
+	$(INSTALL) -D -m 755 $(PROG) $(DESTDIR)$(bindir)/$(PROG)
 
 clean:
 	rm -f $(PROG)
