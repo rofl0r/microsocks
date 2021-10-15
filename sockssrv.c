@@ -26,6 +26,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <signal.h>
@@ -56,6 +57,7 @@
 
 static const char* auth_user;
 static const char* auth_pass;
+static bool auth_once = false;
 static sblist* auth_ips;
 static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
@@ -316,7 +318,7 @@ static void* clientthread(void *data) {
 				if(ret != EC_SUCCESS)
 					goto breakloop;
 				t->state = SS_3_AUTHED;
-				if(auth_ips && !pthread_rwlock_wrlock(&auth_ips_lock)) {
+				if(auth_once && !pthread_rwlock_wrlock(&auth_ips_lock)) {
 					if(!is_in_authed_list(&t->client.addr))
 						add_auth_ip(&t->client.addr);
 					pthread_rwlock_unlock(&auth_ips_lock);
@@ -387,10 +389,13 @@ int main(int argc, char** argv) {
 	int ch;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1b:i:p:u:P:")) != -1) {
+	while((ch = getopt(argc, argv, ":1b:i:p:w:u:P:")) != -1) {
 		switch(ch) {
 			case '1':
-				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				if(!auth_ips) {
+					auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				}
+				auth_once = true;
 				break;
 			case 'b':
 				resolve_sa(optarg, 0, &bind_addr);
@@ -408,6 +413,14 @@ int main(int argc, char** argv) {
 				break;
 			case 'p':
 				port = atoi(optarg);
+				break;
+			case 'w':
+				if(!auth_ips) {
+					auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				}
+				union sockaddr_union whitelist_addr = {.v4.sin_family = AF_UNSPEC};
+				resolve_sa(optarg, 0, &whitelist_addr);
+				add_auth_ip(&whitelist_addr);
 				break;
 			case ':':
 				dprintf(2, "error: option -%c requires an operand\n", optopt);
