@@ -36,6 +36,12 @@
 #include "server.h"
 #include "sblist.h"
 
+/* timeout in microseconds on resource exhaustion to prevent excessive
+   cpu usage. */
+#ifndef FAILURE_TIMEOUT
+#define FAILURE_TIMEOUT 64
+#endif
+
 #ifndef MAX
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
@@ -442,7 +448,7 @@ int main(int argc, char** argv) {
 		if(server_waitclient(&s, &c)) {
 			dolog("failed to accept connection\n");
 			free(curr);
-			usleep(1000);
+			usleep(FAILURE_TIMEOUT);
 			continue;
 		}
 		curr->client = c;
@@ -451,7 +457,7 @@ int main(int argc, char** argv) {
 			free(curr);
 			oom:
 			dolog("rejecting connection due to OOM\n");
-			usleep(16); /* prevent 100% CPU usage in OOM situation */
+			usleep(FAILURE_TIMEOUT); /* prevent 100% CPU usage in OOM situation */
 			continue;
 		}
 		pthread_attr_t *a = 0, attr;
