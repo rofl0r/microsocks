@@ -439,7 +439,12 @@ int main(int argc, char** argv) {
 		struct thread *curr = malloc(sizeof (struct thread));
 		if(!curr) goto oom;
 		curr->done = 0;
-		if(server_waitclient(&s, &c)) continue;
+		if(server_waitclient(&s, &c)) {
+			dolog("failed to accept connection\n");
+			free(curr);
+			usleep(1000);
+			continue;
+		}
 		curr->client = c;
 		if(!sblist_add(threads, &curr)) {
 			close(curr->client.fd);
