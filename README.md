@@ -63,3 +63,17 @@ Supported SOCKS5 Features
 - IPv4, IPv6, DNS
 - TCP (no UDP at this time)
 
+compile time options
+--------------------
+
+    make CFLAGS=-DSOMARK 
+
+microsocks can be compiled with SO_MARK support on linux 2.6.25+. This
+enables 'marking' of outgoing packets for use with policy-based routing
+which allows to route packets through a non-default interface. E.g.:
+
+    ip rule add fwmark 1000 table 200
+    ip route add default dev tun1 table 200
+    microsocks -m 1000
+
+will route all connections through device `tun1`
