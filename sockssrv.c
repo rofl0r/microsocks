@@ -111,6 +111,22 @@ struct thread {
 static void dolog(const char* fmt, ...) { }
 #endif
 
+static int family_choose(struct addrinfo* remote, union sockaddr_union* bind_addr) {
+	int family = SOCKADDR_UNION_AF(bind_addr);
+	return family == AF_UNSPEC ? remote->ai_family : family;
+}
+
+static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union* bind_addr) {
+	int family = SOCKADDR_UNION_AF(bind_addr);
+	if(family == AF_UNSPEC) return list;
+	struct addrinfo* p;
+	for(p=list;p;p=p->ai_next) {
+		if(p->ai_family == family) return p;
+	}
+	dprintf(2, "warning: address family mismatch\n");
+	return list;
+}
+
 static int connect_socks_target(unsigned char *buf, size_t n, struct client *client) {
 	if(n < 5) return -EC_GENERAL_FAILURE;
 	if(buf[0] != 5) return -EC_GENERAL_FAILURE;
@@ -146,7 +162,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	port = (buf[minlen-2] << 8) | buf[minlen-1];
 	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
 	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
-	int fd = socket(remote->ai_addr->sa_family, SOCK_STREAM, 0);
+	int family = family_choose(remote, &bind_addr);
+	int fd = socket(family, SOCK_STREAM, 0);
 	if(fd == -1) {
 		eval_errno:
 		if(fd != -1) close(fd);
@@ -173,7 +190,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	}
 	if(SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC && bindtoip(fd, &bind_addr) == -1)
 		goto eval_errno;
-	if(connect(fd, remote->ai_addr, remote->ai_addrlen) == -1)
+	struct addrinfo* addr = addr_choose(remote, &bind_addr);
+	if(connect(fd, addr->ai_addr, addr->ai_addrlen) == -1)
 		goto eval_errno;
 
 	freeaddrinfo(remote);
