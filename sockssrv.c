@@ -273,7 +273,6 @@ static void copyloop(int fd1, int fd2) {
 		   when a connection is really unused. */
 		switch(poll(fds, 2, 60*15*1000)) {
 			case 0:
-				send_error(fd1, EC_TTL_EXPIRED);
 				return;
 			case -1:
 				if(errno == EINTR || errno == EAGAIN) continue;
