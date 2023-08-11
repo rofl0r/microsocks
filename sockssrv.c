@@ -33,8 +33,10 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
-#include "server.h"
+
 #include "sblist.h"
+#include "server.h"
+#include "sockssrv.h"
 
 /* timeout in microseconds on resource exhaustion to prevent excessive
    cpu usage. */
@@ -68,31 +70,6 @@ static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
 static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
 
-enum socksstate {
-	SS_1_CONNECTED,
-	SS_2_NEED_AUTH, /* skipped if NO_AUTH method supported */
-	SS_3_AUTHED,
-};
-
-enum authmethod {
-	AM_NO_AUTH = 0,
-	AM_GSSAPI = 1,
-	AM_USERNAME = 2,
-	AM_INVALID = 0xFF
-};
-
-enum errorcode {
-	EC_SUCCESS = 0,
-	EC_GENERAL_FAILURE = 1,
-	EC_NOT_ALLOWED = 2,
-	EC_NET_UNREACHABLE = 3,
-	EC_HOST_UNREACHABLE = 4,
-	EC_CONN_REFUSED = 5,
-	EC_TTL_EXPIRED = 6,
-	EC_COMMAND_NOT_SUPPORTED = 7,
-	EC_ADDRESSTYPE_NOT_SUPPORTED = 8,
-};
-
 struct thread {
 	pthread_t pt;
 	struct client client;
@@ -119,6 +96,50 @@ static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union*
 	for(p=list; p; p=p->ai_next)
 		if(p->ai_family == af) return p;
 	return list;
+}
+
+static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, union sockaddr_union* addr) {
+	if(n < 5) return -EC_GENERAL_FAILURE;
+	if(buf[0] != VERSION) return -EC_GENERAL_FAILURE;
+	if(buf[1] != CONNECT || buf[1] != UDP_ASSOCIATE) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT and UDP ASSOCIATE method */
+	if(buf[2] != RSV) return -EC_GENERAL_FAILURE; /* malformed packet */
+
+		int af = AF_INET;
+	size_t minlen = 4 + 4 + 2, l;
+	char namebuf[256];
+	struct addrinfo* remote;
+
+	switch(buf[3]) {
+		case 4: /* ipv6 */
+			af = AF_INET6;
+			minlen = 4 + 2 + 16;
+			/* fall through */
+		case 1: /* ipv4 */
+			if(n < minlen) return -EC_GENERAL_FAILURE;
+			if(namebuf != inet_ntop(af, buf+4, namebuf, sizeof namebuf))
+				return -EC_GENERAL_FAILURE; /* malformed or too long addr */
+			break;
+		case 3: /* dns name */
+			l = buf[4];
+			minlen = 4 + 2 + l + 1;
+			if(n < 4 + 2 + l + 1) return -EC_GENERAL_FAILURE;
+			memcpy(namebuf, buf+4+1, l);
+			namebuf[l] = 0;
+			break;
+		default:
+			return -EC_ADDRESSTYPE_NOT_SUPPORTED;
+	}
+	unsigned short port;
+	port = (buf[minlen-2] << 8) | buf[minlen-1];
+	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
+	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
+	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
+	if (raddr->ai_family == AF_INET) {
+		memcpy(&addr->v4, raddr->ai_addr, raddr->ai_addrlen); 
+	} else {
+		memcpy(&addr->v6, raddr->ai_addr, raddr->ai_addrlen); 
+	}
+	freeaddrinfo(remote);
 }
 
 static int connect_socks_target(unsigned char *buf, size_t n, struct client *client) {
