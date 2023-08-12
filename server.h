@@ -11,31 +11,31 @@
 #pragma RcB2 DEP "server.c"
 
 union sockaddr_union {
-	struct sockaddr_in  v4;
-	struct sockaddr_in6 v6;
+    struct sockaddr_in  v4;
+    struct sockaddr_in6 v6;
 };
 
 #define SOCKADDR_UNION_AF(PTR) (PTR)->v4.sin_family
 
 #define SOCKADDR_UNION_LENGTH(PTR) ( \
-	( SOCKADDR_UNION_AF(PTR) == AF_INET  ) ? sizeof((PTR)->v4) : ( \
-	( SOCKADDR_UNION_AF(PTR) == AF_INET6 ) ? sizeof((PTR)->v6) : 0 ) )
+    ( SOCKADDR_UNION_AF(PTR) == AF_INET  ) ? sizeof((PTR)->v4) : ( \
+    ( SOCKADDR_UNION_AF(PTR) == AF_INET6 ) ? sizeof((PTR)->v6) : 0 ) )
 
 #define SOCKADDR_UNION_ADDRESS(PTR) ( \
-	( SOCKADDR_UNION_AF(PTR) == AF_INET  ) ? (void*) &(PTR)->v4.sin_addr  : ( \
-	( SOCKADDR_UNION_AF(PTR) == AF_INET6 ) ? (void*) &(PTR)->v6.sin6_addr : (void*) 0 ) )
+    ( SOCKADDR_UNION_AF(PTR) == AF_INET  ) ? (void*) &(PTR)->v4.sin_addr  : ( \
+    ( SOCKADDR_UNION_AF(PTR) == AF_INET6 ) ? (void*) &(PTR)->v6.sin6_addr : (void*) 0 ) )
 
 #define SOCKADDR_UNION_PORT(PTR) ( \
-	( SOCKADDR_UNION_AF(PTR) == AF_INET  ) ? (PTR)->v4.sin_port  : ( \
-	( SOCKADDR_UNION_AF(PTR) == AF_INET6 ) ? (PTR)->v6.sin6_port : 0 ) )
+    ( SOCKADDR_UNION_AF(PTR) == AF_INET  ) ? (PTR)->v4.sin_port  : ( \
+    ( SOCKADDR_UNION_AF(PTR) == AF_INET6 ) ? (PTR)->v6.sin6_port : 0 ) )
 
 struct client {
-	union sockaddr_union addr;
-	int fd;
+    union sockaddr_union addr;
+    int fd;
 };
 
 struct server {
-	int fd;
+    int fd;
 };
 
 int resolve_tcp(const char *host, unsigned short port, struct addrinfo** addr);
