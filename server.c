@@ -5,6 +5,7 @@
 
 int resolve_tcp(const char *host, unsigned short port, struct addrinfo** addr) {
     struct addrinfo hints = {
+        .ai_flags = AI_PASSIVE,
         .ai_family = AF_UNSPEC,
         .ai_socktype = SOCK_STREAM,
     };
@@ -15,6 +16,7 @@ int resolve_tcp(const char *host, unsigned short port, struct addrinfo** addr) {
 
 int resolve_udp(const char *host, unsigned short port, struct addrinfo** addr) {
     struct addrinfo hints = {
+        .ai_flags = AI_PASSIVE,
         .ai_family = AF_UNSPEC,
         .ai_socktype = SOCK_DGRAM,
     };
@@ -28,7 +30,7 @@ int resolve_sa(const char *host, union sockaddr_union *res) {
     struct addrinfo *ainfo = 0;
     SOCKADDR_UNION_AF(res) = AF_UNSPEC;
     int ret;
-    if((ret = resolve_tcp(host, 0, &ainfo))) return ret;
+    if((ret = resolve_tcp(host, 0, &ainfo))) return -1;
     memcpy(res, ainfo->ai_addr, ainfo->ai_addrlen);
     freeaddrinfo(ainfo);
     return 0;
