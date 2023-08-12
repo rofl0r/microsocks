@@ -29,12 +29,19 @@ enum errorcode {
 	EC_ADDRESSTYPE_NOT_SUPPORTED = 8,
 };
 
-enum {
+enum socks5_cmd {
     CONNECT = 1,
-    UDP_ASSOCIATE = 3
+    UDP_ASSOCIATE = 3,
 };
 
 const int VERSION = 5;
 const int RSV = 0;
+
+enum socks5_addr_type {
+    SOCKS5_ADDR_UNKNOWN = 0,
+    SOCKS5_IPV4 = 1,
+    SOCKS5_DNS = 3,
+    SOCKS5_IPV6 = 4,
+};
 
 #endif

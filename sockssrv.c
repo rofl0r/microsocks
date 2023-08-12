@@ -77,6 +77,12 @@ struct thread {
 	volatile int  done;
 };
 
+struct service_addr {
+    enum socks5_addr_type type;
+    char* host;
+    unsigned short port;
+};
+
 #ifndef CONFIG_LOG
 #define CONFIG_LOG 1
 #endif
@@ -98,72 +104,28 @@ static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union*
 	return list;
 }
 
-static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, union sockaddr_union* addr) {
+static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, struct service_addr* svc_addr) {
 	if(n < 5) return -EC_GENERAL_FAILURE;
 	if(buf[0] != VERSION) return -EC_GENERAL_FAILURE;
-	if(buf[1] != CONNECT || buf[1] != UDP_ASSOCIATE) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT and UDP ASSOCIATE method */
+	if(buf[1] != CONNECT && buf[1] != UDP_ASSOCIATE) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT and UDP ASSOCIATE method */
+    *cmd = buf[1];
 	if(buf[2] != RSV) return -EC_GENERAL_FAILURE; /* malformed packet */
-
-		int af = AF_INET;
-	size_t minlen = 4 + 4 + 2, l;
-	char namebuf[256];
-	struct addrinfo* remote;
-
-	switch(buf[3]) {
-		case 4: /* ipv6 */
-			af = AF_INET6;
-			minlen = 4 + 2 + 16;
-			/* fall through */
-		case 1: /* ipv4 */
-			if(n < minlen) return -EC_GENERAL_FAILURE;
-			if(namebuf != inet_ntop(af, buf+4, namebuf, sizeof namebuf))
-				return -EC_GENERAL_FAILURE; /* malformed or too long addr */
-			break;
-		case 3: /* dns name */
-			l = buf[4];
-			minlen = 4 + 2 + l + 1;
-			if(n < 4 + 2 + l + 1) return -EC_GENERAL_FAILURE;
-			memcpy(namebuf, buf+4+1, l);
-			namebuf[l] = 0;
-			break;
-		default:
-			return -EC_ADDRESSTYPE_NOT_SUPPORTED;
-	}
-	unsigned short port;
-	port = (buf[minlen-2] << 8) | buf[minlen-1];
-	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
-	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
-	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
-	if (raddr->ai_family == AF_INET) {
-		memcpy(&addr->v4, raddr->ai_addr, raddr->ai_addrlen); 
-	} else {
-		memcpy(&addr->v6, raddr->ai_addr, raddr->ai_addrlen); 
-	}
-	freeaddrinfo(remote);
-}
-
-static int connect_socks_target(unsigned char *buf, size_t n, struct client *client) {
-	if(n < 5) return -EC_GENERAL_FAILURE;
-	if(buf[0] != 5) return -EC_GENERAL_FAILURE;
-	if(buf[1] != 1) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT method */
-	if(buf[2] != 0) return -EC_GENERAL_FAILURE; /* malformed packet */
 
 	int af = AF_INET;
 	size_t minlen = 4 + 4 + 2, l;
 	char namebuf[256];
-	struct addrinfo* remote;
 
 	switch(buf[3]) {
-		case 4: /* ipv6 */
+		case SOCKS5_IPV6: /* ipv6 */
 			af = AF_INET6;
 			minlen = 4 + 2 + 16;
 			/* fall through */
-		case 1: /* ipv4 */
+		case SOCKS5_IPV4: /* ipv4 */
 			if(n < minlen) return -EC_GENERAL_FAILURE;
 			if(namebuf != inet_ntop(af, buf+4, namebuf, sizeof namebuf))
 				return -EC_GENERAL_FAILURE; /* malformed or too long addr */
 			break;
-		case 3: /* dns name */
+		case SOCKS5_DNS: /* dns name */
 			l = buf[4];
 			minlen = 4 + 2 + l + 1;
 			if(n < 4 + 2 + l + 1) return -EC_GENERAL_FAILURE;
@@ -173,10 +135,17 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		default:
 			return -EC_ADDRESSTYPE_NOT_SUPPORTED;
 	}
-	unsigned short port;
-	port = (buf[minlen-2] << 8) | buf[minlen-1];
+    svc_addr->type = buf[3];
+	svc_addr->port = (buf[minlen-2] << 8) | buf[minlen-1];
+    svc_addr->host = strdup(namebuf);
+    return EC_SUCCESS;
+}
+
+
+static int connect_socks_target(struct service_addr* addr, struct client *client) {
+	struct addrinfo* remote;
 	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
-	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
+	if(resolve_tcp(addr->host, addr->port, &remote)) return -EC_GENERAL_FAILURE;
 	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
 	int fd = socket(raddr->ai_family, SOCK_STREAM, 0);
 	if(fd == -1) {
@@ -212,10 +181,10 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	freeaddrinfo(remote);
 	if(CONFIG_LOG) {
 		char clientname[256];
-		af = SOCKADDR_UNION_AF(&client->addr);
+		int af = SOCKADDR_UNION_AF(&client->addr);
 		void *ipdata = SOCKADDR_UNION_ADDRESS(&client->addr);
 		inet_ntop(af, ipdata, clientname, sizeof clientname);
-		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
+		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, addr->host, addr->port);
 	}
 	return fd;
 }
@@ -338,6 +307,11 @@ static void* clientthread(void *data) {
 	ssize_t n;
 	int ret;
 	int remotefd = -1;
+    struct service_addr svc_addr = {
+        .type = SOCKS5_ADDR_UNKNOWN,
+        .host = NULL,
+        .port = 0,
+    };
 	enum authmethod am;
 	while((n = recv(t->client.fd, buf, sizeof buf, 0)) > 0) {
 		switch(t->state) {
@@ -361,19 +335,33 @@ static void* clientthread(void *data) {
 				}
 				break;
 			case SS_3_AUTHED:
-				ret = connect_socks_target(buf, n, &t->client);
-				if(ret < 0) {
-					send_error(t->client.fd, ret*-1);
-					goto breakloop;
-				}
-				remotefd = ret;
-				send_error(t->client.fd, EC_SUCCESS);
-				copyloop(t->client.fd, remotefd);
-				goto breakloop;
-
+                int cmd;
+                ret = parse_socks_request_header(buf, n, &cmd, &svc_addr);
+                if (ret != EC_SUCCESS) {
+                    goto breakloop;
+                }
+                if (cmd == CONNECT) {
+                    ret = connect_socks_target(&svc_addr, &t->client);
+                    if(ret < 0) {
+                        send_error(t->client.fd, ret*-1);
+                        goto breakloop;
+                    }
+                    remotefd = ret;
+                    send_error(t->client.fd, EC_SUCCESS);
+                    copyloop(t->client.fd, remotefd);
+                    goto breakloop;
+                } else if (cmd == UDP_ASSOCIATE) {
+                    // not implemented
+                } else {
+                    // should not be here
+                    abort();
+                }
 		}
 	}
 breakloop:
+    if (svc_addr.host != NULL) {
+        free(svc_addr.host);
+    }
 
 	if(remotefd != -1)
 		close(remotefd);
@@ -435,7 +423,7 @@ int main(int argc, char** argv) {
 				quiet = 1;
 				break;
 			case 'b':
-				resolve_sa(optarg, 0, &bind_addr);
+				resolve_sa(optarg, &bind_addr);
 				break;
 			case 'u':
 				auth_user = strdup(optarg);
