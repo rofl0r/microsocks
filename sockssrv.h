@@ -27,6 +27,7 @@ enum errorcode {
     EC_TTL_EXPIRED = 6,
     EC_COMMAND_NOT_SUPPORTED = 7,
     EC_ADDRESSTYPE_NOT_SUPPORTED = 8,
+    EC_BIND_IP_NOT_PROVIDED = 9,
 };
 
 enum socks5_cmd {

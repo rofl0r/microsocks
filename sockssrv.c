@@ -95,8 +95,7 @@ struct service_addr {
 static void dolog(const char* fmt, ...) { }
 #endif
 
-static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union* bind_addr) {
-    int af = SOCKADDR_UNION_AF(bind_addr);
+static struct addrinfo* addr_choose(struct addrinfo* list, int af) {
     if(af == AF_UNSPEC) return list;
     struct addrinfo* p;
     for(p=list; p; p=p->ai_next)
@@ -142,20 +141,11 @@ static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, st
 }
 
 
-static int connect_socks_target(struct service_addr* addr, struct client *client) {
-    struct addrinfo* remote;
-    /* there's no suitable errorcode in rfc1928 for dns lookup failure */
-    if(resolve_tcp(addr->host, addr->port, &remote)) return -EC_GENERAL_FAILURE;
-    struct addrinfo* raddr = addr_choose(remote, &bind_addr);
-    if (!raddr) {
-        freeaddrinfo(remote);
-        return EC_ADDRESSTYPE_NOT_SUPPORTED;
-    }
-    int fd = socket(raddr->ai_family, SOCK_STREAM, 0);
+static int connect_socks_target(union sockaddr_union* remote_addr, struct client *client) {
+    int fd = socket(SOCKADDR_UNION_AF(remote_addr), SOCK_STREAM, 0);
     if(fd == -1) {
         eval_errno:
         if(fd != -1) close(fd);
-        freeaddrinfo(remote);
         switch(errno) {
             case ETIMEDOUT:
                 return -EC_TTL_EXPIRED;
@@ -176,18 +166,24 @@ static int connect_socks_target(struct service_addr* addr, struct client *client
             return -EC_GENERAL_FAILURE;
         }
     }
-    if(bindtoip(fd, &bind_addr) == -1)
-        goto eval_errno;
-    if(connect(fd, raddr->ai_addr, raddr->ai_addrlen) == -1)
+    if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
+        if(bindtoip(fd, &bind_addr) == -1)
+            goto eval_errno;
+    }
+    if(connect(fd, SOCKADDR_UNION_ADDRESS(remote_addr), SOCKADDR_UNION_LENGTH(remote_addr)) == -1)
         goto eval_errno;
 
-    freeaddrinfo(remote);
     if(CONFIG_LOG) {
         char clientname[256];
         int af = SOCKADDR_UNION_AF(&client->addr);
         void *ipdata = SOCKADDR_UNION_ADDRESS(&client->addr);
         inet_ntop(af, ipdata, clientname, sizeof clientname);
-        dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, addr->host, addr->port);
+        char targetname[256];
+        af = SOCKADDR_UNION_AF(remote_addr);
+        ipdata = SOCKADDR_UNION_ADDRESS(remote_addr);
+        inet_ntop(af, ipdata, targetname, sizeof targetname);
+        dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, 
+            targetname, SOCKADDR_UNION_PORT(remote_addr));
     }
     return fd;
 }
@@ -248,6 +244,29 @@ static void send_auth_response(int fd, int version, enum authmethod meth) {
     write(fd, buf, 2);
 }
 
+static ssize_t send_response(int fd, enum errorcode ec, union sockaddr_union* addr) {
+    /* position 4 contains ATYP, the address type, which is the same as used in the connect
+       request. we're lazy and return always IPV4 address type in errors. */
+    char buf[4 + 16 + 2] = {VERSION, ec, RSV};
+    size_t len = 0;
+    if (SOCKADDR_UNION_AF(addr) == AF_INET) {
+        buf[3] = SOCKS5_IPV4;
+        memcpy(buf+4, SOCKADDR_UNION_ADDRESS(addr), 4);
+        buf[8] = SOCKADDR_UNION_PORT(addr) >> 8;
+        buf[9] = SOCKADDR_UNION_PORT(addr) | 0xFF;
+        len = 10;
+    } else if (SOCKADDR_UNION_AF(addr) == AF_INET6) {
+        buf[3] = SOCKS5_IPV6;
+        memcpy(buf+4, SOCKADDR_UNION_ADDRESS(addr), 16);
+        buf[20] = SOCKADDR_UNION_PORT(addr) >> 8;
+        buf[21] = SOCKADDR_UNION_PORT(addr) | 0xFF;
+        len = 22;
+    } else {
+        abort();
+    }
+    return write(fd, buf, len);
+}
+
 static void send_error(int fd, enum errorcode ec) {
     /* position 4 contains ATYP, the address type, which is the same as used in the connect
        request. we're lazy and return always IPV4 address type in errors. */
@@ -286,6 +305,44 @@ static void copyloop(int fd1, int fd2) {
     }
 }
 
+static void copy_loop_udp(int tcp_fd, int udp_fd) {
+    // add tcp_fd and udp_fd to poll
+
+    // create another send_fd for sending data to target
+
+    // poll, return when tcp_fd is closed
+    // transfer data between udp_fd and send_fd
+    struct pollfd fds[3] = {
+        [0] = {.fd = tcp_fd, .events = POLLIN},
+        [1] = {.fd = udp_fd, .events = POLLIN},
+        [2] = {.fd = send_fd, .events = POLLOUT},
+    };
+
+    sendto()
+
+    while(1) {
+        switch(poll(fds, 2, 60*15*1000)) {
+            case 0:
+                return;
+            case -1:
+                if(errno == EINTR || errno == EAGAIN) continue;
+                else perror("poll");
+                return;
+        }
+        int infd = (fds[0].revents & POLLIN) ? fd1 : fd2;
+        int outfd = infd == fd2 ? fd1 : fd2;
+        char buf[1024];
+        ssize_t sent = 0, n = read(infd, buf, sizeof buf);
+        if(n <= 0) return;
+        while(sent < n) {
+            ssize_t m = write(outfd, buf+sent, n-sent);
+            if(m < 0) return;
+            sent += m;
+        }
+    }
+
+}
+
 static enum errorcode check_credentials(unsigned char* buf, size_t n) {
     if(n < 5) return EC_GENERAL_FAILURE;
     if(buf[0] != 1) return EC_GENERAL_FAILURE;
@@ -305,20 +362,11 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 
 unsigned short pick_random_port() { return 10000; }
 
-int udp_svc_setup(struct service_addr* client_addr, struct client *client, struct service_addr* udp_svc_addr) {
-    unsigned short port = pick_random_port();
-    struct addrinfo* local_addr;
-    if (resolve_udp(NULL, port, &local_addr)) return -1;
-    struct addrinfo* udp_addr = addr_choose(local_addr, &bind_addr);
-    if (!udp_addr) {
-        freeaddrinfo(local_addr);
-        return EC_ADDRESSTYPE_NOT_SUPPORTED;
-    }
-    int fd = socket(udp_addr->ai_family, SOCK_DGRAM, 0);
+int udp_svc_setup(union sockaddr_union* local_addr) {
+    int fd = socket(SOCKADDR_UNION_AF(&bind_addr), SOCK_DGRAM, 0);
     if(fd == -1) {
         eval_errno:
         if(fd != -1) close(fd);
-        freeaddrinfo(local_addr);
         switch(errno) {
             case ETIMEDOUT:
                 return -EC_TTL_EXPIRED;
@@ -335,15 +383,14 @@ int udp_svc_setup(struct service_addr* client_addr, struct client *client, struc
                 return -EC_HOST_UNREACHABLE;
             case EBADF:
             default:
-            perror("socket/connect");
-            return -EC_GENERAL_FAILURE;
+                perror("socket/connect");
+                return -EC_GENERAL_FAILURE;
         }
     }
-    if(bindtoip(fd, &bind_addr) == -1)
+    if(bindtoip(fd, local_addr) == -1)
         goto eval_errno;
 
-    freeaddrinfo(local_addr);
-    return EC_SUCCESS;
+    return fd;
 }
 
 static void* clientthread(void *data) {
@@ -359,11 +406,7 @@ static void* clientthread(void *data) {
         .host = NULL,
         .port = 0,
     };
-    struct service_addr udp_svc_addr = {
-        .type = SOCKS5_ADDR_UNKNOWN,
-        .host = NULL,
-        .port = 0,
-    };
+    struct addrinfo* remote;
 
     enum authmethod am;
     while((n = recv(t->client.fd, buf, sizeof buf, 0)) > 0) {
@@ -393,24 +436,59 @@ static void* clientthread(void *data) {
                 if (ret != EC_SUCCESS) {
                     goto breakloop;
                 }
+                
                 if (cmd == CONNECT) {
-                    ret = connect_socks_target(&svc_addr, &t->client);
+                    /* there's no suitable errorcode in rfc1928 for dns lookup failure */
+                    if(resolve_tcp(svc_addr.host, svc_addr.port, &remote)) return -EC_GENERAL_FAILURE;
+                    struct addrinfo* raddr = addr_choose(remote, SOCKADDR_UNION_AF(&bind_addr));
+                    if (!raddr) {
+                        freeaddrinfo(remote);
+                        return EC_ADDRESSTYPE_NOT_SUPPORTED;
+                    }
+                    union sockaddr_union remote_addr;
+                    memcpy(&remote_addr, raddr->ai_addr, raddr->ai_addrlen);
+                    ret = connect_socks_target(&remote_addr, &t->client);
                     if(ret < 0) {
                         send_error(t->client.fd, ret*-1);
                         goto breakloop;
                     }
                     int remotefd = ret;
-                    send_error(t->client.fd, EC_SUCCESS);
+                     union sockaddr_union local_addr;
+                    if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
+                        local_addr = bind_addr;
+                    } else {
+                        socklen_t len = sizeof(union sockaddr_union);
+                        if (getsockname(remotefd, (struct sockaddr*)&local_addr, &len)) return -EC_GENERAL_FAILURE;
+                    }
+                    if (-1 == send_response(t->client.fd, EC_SUCCESS, &local_addr)) {
+                        close(remotefd);
+                        goto breakloop;
+                    }
                     copyloop(t->client.fd, remotefd);
                     close(remotefd);
                     goto breakloop;
                 } else if (cmd == UDP_ASSOCIATE) {
-                    ret = udp_svc_setup(&svc_addr, &t->client, &udp_svc_addr);
-                    if(ret < 0) {
-                        send_error(t->client.fd, ret*-1);
+                    if (SOCKADDR_UNION_AF(&bind_addr) == AF_UNSPEC) {
+                        return EC_BIND_IP_NOT_PROVIDED;
+                    }
+                    if (resolve_udp(svc_addr.host, svc_addr.port, &remote)) return -1;
+                    struct addrinfo* raddr = addr_choose(remote, SOCKADDR_UNION_AF(&bind_addr));
+                    if (!raddr) {
+                        freeaddrinfo(remote);
+                        return EC_ADDRESSTYPE_NOT_SUPPORTED;
+                    }
+
+                    int fd = udp_svc_setup(&bind_addr);
+                    if(fd <= 0) {
+                        send_error(t->client.fd, fd*-1);
                         goto breakloop;
                     }
-                    copy_loop_udp(t->client.fd, &svc_addr, &udp_svc_addr);
+                    if (-1 == send_response(t->client.fd, EC_SUCCESS, &bind_addr)) {
+                        close(fd);
+                        goto breakloop;
+                    }
+                    copy_loop_udp(t->client.fd, fd);
+                    close(fd);
                     goto breakloop;
                 } else {
                     // should not be here
@@ -423,9 +501,7 @@ breakloop:
         free(svc_addr.host);
     }
 
-    if (udp_svc_addr.host != NULL) {
-        free(udp_svc_addr.host);
-    }
+    if (!remote) freeaddrinfo(remote);
 
     close(t->client.fd);
     t->done = 1;

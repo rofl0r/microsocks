@@ -37,10 +37,7 @@ int resolve_sa(const char *host, union sockaddr_union *res) {
 }
 
 int bindtoip(int fd, union sockaddr_union *bindaddr) {
-    socklen_t sz = SOCKADDR_UNION_LENGTH(bindaddr);
-    if(sz)
-        return bind(fd, (struct sockaddr*) bindaddr, sz);
-    return 0;
+    return bind(fd, (struct sockaddr*) bindaddr, SOCKADDR_UNION_LENGTH(bindaddr));
 }
 
 int server_waitclient(struct server *server, struct client* client) {
