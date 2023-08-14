@@ -103,6 +103,37 @@ static struct addrinfo* addr_choose(struct addrinfo* list, int af) {
     return p;
 }
 
+static int parse_addrport(unsigned char *buf, size_t n, struct service_addr* addr) {
+    int af = AF_INET;
+    size_t minlen = 1 + 4 + 2, l;
+    char namebuf[256];
+
+    switch(buf[0]) {
+        case SOCKS5_IPV6: /* ipv6 */
+            af = AF_INET6;
+            minlen = 1 + 16 + 2;
+            /* fall through */
+        case SOCKS5_IPV4: /* ipv4 */
+            if(n < minlen) return -EC_GENERAL_FAILURE;
+            if(namebuf != inet_ntop(af, buf+1, namebuf, sizeof namebuf))
+                return -EC_GENERAL_FAILURE; /* malformed or too long addr */
+            break;
+        case SOCKS5_DNS: /* dns name */
+            l = buf[1];
+            minlen = 1 + (1 + l) + 2 ;
+            if(n < minlen) return -EC_GENERAL_FAILURE;
+            memcpy(namebuf, buf+1+1, l);
+            namebuf[l] = 0;
+            break;
+        default:
+            return -EC_ADDRESSTYPE_NOT_SUPPORTED;
+    }
+    addr->type = buf[0];
+    addr->port = (buf[minlen-2] << 8) | buf[minlen-1];
+    addr->host = strdup(namebuf);
+    return EC_SUCCESS;
+}
+
 static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, struct service_addr* svc_addr) {
     if(n < 5) return -EC_GENERAL_FAILURE;
     if(buf[0] != VERSION) return -EC_GENERAL_FAILURE;
@@ -305,29 +336,51 @@ static void copyloop(int fd1, int fd2) {
     }
 }
 
+static ssize_t extract_udp(char* buf, ssize_t n, union sockaddr_union* target_addr, char* data) {
+    if (buf[0] != RSV) return -EC_GENERAL_FAILURE;
+    if (buf[1] != 0) return -EC_GENERAL_FAILURE; // framentation not supported
+}
+
 static void copy_loop_udp(int tcp_fd, int udp_fd) {
     // add tcp_fd and udp_fd to poll
 
     // create another send_fd for sending data to target
+    int middle_fd = -1;
+    int n;
 
     // poll, return when tcp_fd is closed
     // transfer data between udp_fd and send_fd
     struct pollfd fds[3] = {
         [0] = {.fd = tcp_fd, .events = POLLIN},
         [1] = {.fd = udp_fd, .events = POLLIN},
-        [2] = {.fd = send_fd, .events = POLLOUT},
+        [2] = {.fd = middle_fd, .events = POLLOUT},
     };
 
-    sendto()
-
+    int poll_fds = 2;
     while(1) {
-        switch(poll(fds, 2, 60*15*1000)) {
+        switch(poll(fds, poll_fds, 60*15*1000)) {
             case 0:
                 return;
             case -1:
                 if(errno == EINTR || errno == EAGAIN) continue;
                 else perror("poll");
                 return;
+        }
+        char buf[1024];
+        if (fds[0].revents & POLLIN) {
+            if (read(fds[0].fd, buf, sizeof(buf)) == 0) {
+                // SOCKS5 TCP connection closed
+                if (middle_fd > 0) close(middle_fd);
+                return;
+            }
+        }
+        if (fds[1].revents & POLLIN) {
+            union sockaddr_union target_addr;
+            if (middle_fd < 0) {
+                middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
+            }
+            sendto(middle_fd, buf, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
+            poll_fds = 3;
         }
         int infd = (fds[0].revents & POLLIN) ? fd1 : fd2;
         int outfd = infd == fd2 ? fd1 : fd2;
