@@ -104,7 +104,9 @@ static struct addrinfo* addr_choose(struct addrinfo* list, int af) {
 }
 
 static int parse_addrport(unsigned char *buf, size_t n, struct service_addr* addr) {
+    if (n < 2) return -EC_GENERAL_FAILURE;
     int af = AF_INET;
+    int offset = 0;
     size_t minlen = 1 + 4 + 2, l;
     char namebuf[256];
 
@@ -131,46 +133,20 @@ static int parse_addrport(unsigned char *buf, size_t n, struct service_addr* add
     addr->type = buf[0];
     addr->port = (buf[minlen-2] << 8) | buf[minlen-1];
     addr->host = strdup(namebuf);
-    return EC_SUCCESS;
+    return minlen;
 }
 
 static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, struct service_addr* svc_addr) {
-    if(n < 5) return -EC_GENERAL_FAILURE;
+    if(n < 3) return -EC_GENERAL_FAILURE;
     if(buf[0] != VERSION) return -EC_GENERAL_FAILURE;
     if(buf[1] != CONNECT && buf[1] != UDP_ASSOCIATE) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT and UDP ASSOCIATE method */
     *cmd = buf[1];
     if(buf[2] != RSV) return -EC_GENERAL_FAILURE; /* malformed packet */
 
-    int af = AF_INET;
-    size_t minlen = 4 + 4 + 2, l;
-    char namebuf[256];
-
-    switch(buf[3]) {
-        case SOCKS5_IPV6: /* ipv6 */
-            af = AF_INET6;
-            minlen = 4 + 2 + 16;
-            /* fall through */
-        case SOCKS5_IPV4: /* ipv4 */
-            if(n < minlen) return -EC_GENERAL_FAILURE;
-            if(namebuf != inet_ntop(af, buf+4, namebuf, sizeof namebuf))
-                return -EC_GENERAL_FAILURE; /* malformed or too long addr */
-            break;
-        case SOCKS5_DNS: /* dns name */
-            l = buf[4];
-            minlen = 4 + 2 + l + 1;
-            if(n < 4 + 2 + l + 1) return -EC_GENERAL_FAILURE;
-            memcpy(namebuf, buf+4+1, l);
-            namebuf[l] = 0;
-            break;
-        default:
-            return -EC_ADDRESSTYPE_NOT_SUPPORTED;
-    }
-    svc_addr->type = buf[3];
-    svc_addr->port = (buf[minlen-2] << 8) | buf[minlen-1];
-    svc_addr->host = strdup(namebuf);
+    int ret = parse_addrport(buf + 3, n - 3, svc_addr);
+    if (ret < 0) return ret;
     return EC_SUCCESS;
 }
-
 
 static int connect_socks_target(union sockaddr_union* remote_addr, struct client *client) {
     int fd = socket(SOCKADDR_UNION_AF(remote_addr), SOCK_STREAM, 0);
@@ -276,8 +252,7 @@ static void send_auth_response(int fd, int version, enum authmethod meth) {
 }
 
 static ssize_t send_response(int fd, enum errorcode ec, union sockaddr_union* addr) {
-    /* position 4 contains ATYP, the address type, which is the same as used in the connect
-       request. we're lazy and return always IPV4 address type in errors. */
+    // IPv6 takes 22 bytes, which is the longest
     char buf[4 + 16 + 2] = {VERSION, ec, RSV};
     size_t len = 0;
     if (SOCKADDR_UNION_AF(addr) == AF_INET) {
@@ -336,26 +311,40 @@ static void copyloop(int fd1, int fd2) {
     }
 }
 
-static ssize_t extract_udp(char* buf, ssize_t n, union sockaddr_union* target_addr, char* data) {
-    if (buf[0] != RSV) return -EC_GENERAL_FAILURE;
-    if (buf[1] != 0) return -EC_GENERAL_FAILURE; // framentation not supported
+static ssize_t extract_udp_data(char* buf, ssize_t n, struct service_addr* target_addr, char** data) {
+    if (n < 3) return -EC_GENERAL_FAILURE;
+    if (buf[0] != RSV || buf[1] != RSV) return -EC_GENERAL_FAILURE;
+    if (buf[2] != RSV) return -EC_GENERAL_FAILURE;  // framentation not supported
+
+    struct service_addr addr;
+    buf += 3, n -= 3;
+    int ret = parse_addrport(buf, n, target_addr);
+    if (ret < 0) {
+        return ret;
+    }
+    *data = buf + ret;
+    n -= ret;
+    return n;
+}
+
+// the returned buffer must be manually freed
+static ssize_t prepare_udp_data(char* data, ssize_t n1, struct service_addr* client_addr, char* buf, ssize_t n2) {
+    return 0;
 }
 
 static void copy_loop_udp(int tcp_fd, int udp_fd) {
     // add tcp_fd and udp_fd to poll
-
-    // create another send_fd for sending data to target
-    int middle_fd = -1;
-    int n;
-
-    // poll, return when tcp_fd is closed
     // transfer data between udp_fd and send_fd
+    
+    // create another send_fd for relaying data to target
+    int middle_fd = -1;
     struct pollfd fds[3] = {
         [0] = {.fd = tcp_fd, .events = POLLIN},
         [1] = {.fd = udp_fd, .events = POLLIN},
         [2] = {.fd = middle_fd, .events = POLLOUT},
     };
 
+    int n;
     int poll_fds = 2;
     while(1) {
         switch(poll(fds, poll_fds, 60*15*1000)) {
@@ -366,7 +355,7 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 else perror("poll");
                 return;
         }
-        char buf[1024];
+        char buf[4096];  // support up to 4K worth of UDP message
         if (fds[0].revents & POLLIN) {
             if (read(fds[0].fd, buf, sizeof(buf)) == 0) {
                 // SOCKS5 TCP connection closed
@@ -375,13 +364,39 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
             }
         }
         if (fds[1].revents & POLLIN) {
-            union sockaddr_union target_addr;
-            if (middle_fd < 0) {
-                middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
+            union sockaddr_union addr;
+            socklen_t len = sizeof(union sockaddr_union);
+            n = recv(udp_fd, buf, sizeof(buf), 0);
+            if (n == -1) {
+                if(errno == EINTR || errno == EAGAIN) continue;
+                perror("recvfrom");
+                if (middle_fd > 0) close(middle_fd);
+                return;
             }
-            sendto(middle_fd, buf, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
-            poll_fds = 3;
+        
+            struct service_addr address;
+            union sockaddr_union target_addr;
+            char* data;
+            n = extract_udp_data(buf, n, &address, &data);
+            if (middle_fd < 0) {
+                struct addrinfo* addrinfo;
+                if (resolve_udp(address.host, address.port, addrinfo)) {
+                    perror("resolve_udp");
+                    return;
+                }
+                struct addrinfo* raddr = addr_choose(addrinfo, SOCKADDR_UNION_AF(&bind_addr));
+                if (!raddr) {
+                    freeaddrinfo(addrinfo);
+                    return;
+                }
+                memcpy(&target_addr, raddr->ai_addr, raddr->ai_addrlen);
+                freeaddrinfo(addrinfo);
+                middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
+                poll_fds = 3;
+            }
+            sendto(middle_fd, data, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
         }
+
         int infd = (fds[0].revents & POLLIN) ? fd1 : fd2;
         int outfd = infd == fd2 ? fd1 : fd2;
         char buf[1024];
