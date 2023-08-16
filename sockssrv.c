@@ -103,7 +103,7 @@ static struct addrinfo* addr_choose(struct addrinfo* list, int af) {
     return p;
 }
 
-static int parse_addrport(unsigned char *buf, size_t n, struct service_addr* addr) {
+static int parse_addrport(unsigned char *buf, size_t n, enum socks5_socket_type socktype, union sockaddr_union* addr) {
     if (n < 2) return -EC_GENERAL_FAILURE;
     int af = AF_INET;
     int offset = 0;
@@ -130,20 +130,35 @@ static int parse_addrport(unsigned char *buf, size_t n, struct service_addr* add
         default:
             return -EC_ADDRESSTYPE_NOT_SUPPORTED;
     }
-    addr->type = buf[0];
-    addr->port = (buf[minlen-2] << 8) | buf[minlen-1];
-    addr->host = strdup(namebuf);
+    
+    unsigned short port = (buf[minlen-2] << 8) | buf[minlen-1];
+    struct addrinfo *remote;
+    if (socktype == TCP_SOCKET) {
+        /* there's no suitable errorcode in rfc1928 for dns lookup failure */
+        if(resolve_tcp(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
+    } else if (socktype == UDP_SOCKET) {
+        if(resolve_udp(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
+    } else {
+        abort();
+    }
+    struct addrinfo* raddr = addr_choose(remote, SOCKADDR_UNION_AF(&bind_addr));
+    if (!raddr) {
+        freeaddrinfo(remote);
+        return EC_ADDRESSTYPE_NOT_SUPPORTED;
+    }
+    memcpy(addr, raddr->ai_addr, raddr->ai_addrlen);
     return minlen;
 }
 
-static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, struct service_addr* svc_addr) {
+static int parse_socks_request_header(unsigned char *buf, size_t n, int* cmd, union sockaddr_union* svc_addr) {
     if(n < 3) return -EC_GENERAL_FAILURE;
     if(buf[0] != VERSION) return -EC_GENERAL_FAILURE;
     if(buf[1] != CONNECT && buf[1] != UDP_ASSOCIATE) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT and UDP ASSOCIATE method */
     *cmd = buf[1];
     if(buf[2] != RSV) return -EC_GENERAL_FAILURE; /* malformed packet */
 
-    int ret = parse_addrport(buf + 3, n - 3, svc_addr);
+    int socktype = *cmd == CONNECT? TCP_SOCKET : UDP_SOCKET;
+    int ret = parse_addrport(buf + 3, n - 3, socktype, svc_addr);
     if (ret < 0) return ret;
     return EC_SUCCESS;
 }
@@ -311,14 +326,13 @@ static void copyloop(int fd1, int fd2) {
     }
 }
 
-static ssize_t extract_udp_data(char* buf, ssize_t n, struct service_addr* target_addr, char** data) {
+static ssize_t extract_udp_data(char* buf, ssize_t n, union sockaddr_union* target_addr, char** data) {
     if (n < 3) return -EC_GENERAL_FAILURE;
     if (buf[0] != RSV || buf[1] != RSV) return -EC_GENERAL_FAILURE;
     if (buf[2] != RSV) return -EC_GENERAL_FAILURE;  // framentation not supported
 
-    struct service_addr addr;
     buf += 3, n -= 3;
-    int ret = parse_addrport(buf, n, target_addr);
+    int ret = parse_addrport(buf, n, UDP_SOCKET, target_addr);
     if (ret < 0) {
         return ret;
     }
@@ -328,7 +342,7 @@ static ssize_t extract_udp_data(char* buf, ssize_t n, struct service_addr* targe
 }
 
 // the returned buffer must be manually freed
-static ssize_t prepare_udp_data(char* data, ssize_t n1, struct service_addr* client_addr, char* buf, ssize_t n2) {
+static ssize_t prepare_udp_data(char* data, ssize_t n1, union sockaddr_union* client_addr, char* buf, ssize_t n2) {
     return 0;
 }
 
@@ -365,7 +379,6 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
         }
         if (fds[1].revents & POLLIN) {
             union sockaddr_union addr;
-            socklen_t len = sizeof(union sockaddr_union);
             n = recv(udp_fd, buf, sizeof(buf), 0);
             if (n == -1) {
                 if(errno == EINTR || errno == EAGAIN) continue;
@@ -374,35 +387,36 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 return;
             }
         
-            struct service_addr address;
             union sockaddr_union target_addr;
             char* data;
-            n = extract_udp_data(buf, n, &address, &data);
+            n = extract_udp_data(buf, n, &target_addr, &data);
             if (middle_fd < 0) {
-                struct addrinfo* addrinfo;
-                if (resolve_udp(address.host, address.port, addrinfo)) {
-                    perror("resolve_udp");
-                    return;
-                }
-                struct addrinfo* raddr = addr_choose(addrinfo, SOCKADDR_UNION_AF(&bind_addr));
-                if (!raddr) {
-                    freeaddrinfo(addrinfo);
-                    return;
-                }
-                memcpy(&target_addr, raddr->ai_addr, raddr->ai_addrlen);
-                freeaddrinfo(addrinfo);
                 middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
                 poll_fds = 3;
+                if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
+                    if (-1 == bindtoip(middle_fd, &bind_addr)) {
+                        perror("bindtoip");
+                        close(middle_fd);
+                        return;
+                    }
+                }
             }
-            sendto(middle_fd, data, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
+            n = sendto(middle_fd, data, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
+            if (n < 0) {
+                perror("sendto");
+                close(middle_fd);
+                return;
+            }
         }
 
-        int infd = (fds[0].revents & POLLIN) ? fd1 : fd2;
-        int outfd = infd == fd2 ? fd1 : fd2;
-        char buf[1024];
-        ssize_t sent = 0, n = read(infd, buf, sizeof buf);
-        if(n <= 0) return;
-        while(sent < n) {
+        if (fds[2].revents & POLLIN) {
+            union sockaddr_union remote_addr;
+            ssize_t n = recvfrom(middle_fd, buf, sizeof buf, 0, (struct sockaddr*)&remote_addr, sizeof(remote_addr));
+            if(n <= 0) {
+                perror("read from middle_fd");
+                return;
+            }
+            prepare_udp_data(buf, n, , );
             ssize_t m = write(outfd, buf+sent, n-sent);
             if(m < 0) return;
             sent += m;
@@ -474,6 +488,7 @@ static void* clientthread(void *data) {
         .host = NULL,
         .port = 0,
     };
+    union sockaddr_union address;
     struct addrinfo* remote;
 
     enum authmethod am;
@@ -500,22 +515,13 @@ static void* clientthread(void *data) {
                 break;
             case SS_3_AUTHED:
                 int cmd;
-                ret = parse_socks_request_header(buf, n, &cmd, &svc_addr);
+                ret = parse_socks_request_header(buf, n, &cmd, &address);
                 if (ret != EC_SUCCESS) {
                     goto breakloop;
                 }
                 
                 if (cmd == CONNECT) {
-                    /* there's no suitable errorcode in rfc1928 for dns lookup failure */
-                    if(resolve_tcp(svc_addr.host, svc_addr.port, &remote)) return -EC_GENERAL_FAILURE;
-                    struct addrinfo* raddr = addr_choose(remote, SOCKADDR_UNION_AF(&bind_addr));
-                    if (!raddr) {
-                        freeaddrinfo(remote);
-                        return EC_ADDRESSTYPE_NOT_SUPPORTED;
-                    }
-                    union sockaddr_union remote_addr;
-                    memcpy(&remote_addr, raddr->ai_addr, raddr->ai_addrlen);
-                    ret = connect_socks_target(&remote_addr, &t->client);
+                    ret = connect_socks_target(&address, &t->client);
                     if(ret < 0) {
                         send_error(t->client.fd, ret*-1);
                         goto breakloop;
@@ -536,17 +542,7 @@ static void* clientthread(void *data) {
                     close(remotefd);
                     goto breakloop;
                 } else if (cmd == UDP_ASSOCIATE) {
-                    if (SOCKADDR_UNION_AF(&bind_addr) == AF_UNSPEC) {
-                        return EC_BIND_IP_NOT_PROVIDED;
-                    }
-                    if (resolve_udp(svc_addr.host, svc_addr.port, &remote)) return -1;
-                    struct addrinfo* raddr = addr_choose(remote, SOCKADDR_UNION_AF(&bind_addr));
-                    if (!raddr) {
-                        freeaddrinfo(remote);
-                        return EC_ADDRESSTYPE_NOT_SUPPORTED;
-                    }
-
-                    int fd = udp_svc_setup(&bind_addr);
+                    int fd = udp_svc_setup(&address);
                     if(fd <= 0) {
                         send_error(t->client.fd, fd*-1);
                         goto breakloop;

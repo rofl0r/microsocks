@@ -45,4 +45,9 @@ enum socks5_addr_type {
     SOCKS5_IPV6 = 4,
 };
 
+enum socks5_socket_type {
+    TCP_SOCKET = 1,
+    UDP_SOCKET =2,
+};
+
 #endif
