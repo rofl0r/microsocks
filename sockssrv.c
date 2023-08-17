@@ -342,7 +342,11 @@ static ssize_t extract_udp_data(char* buf, ssize_t n, union sockaddr_union* targ
 }
 
 // the returned buffer must be manually freed
-static ssize_t prepare_udp_data(char* data, ssize_t n1, union sockaddr_union* client_addr, char* buf, ssize_t n2) {
+static ssize_t prepare_udp_data(char* data, ssize_t n1, int reserved_size, union sockaddr_union* client_addr) {
+    const reserved = 0;
+    char buf[reserved];
+    buf[0] = RSV, buf[1]= RSV;
+
     return 0;
 }
 
@@ -351,14 +355,15 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
     // transfer data between udp_fd and send_fd
     
     // create another send_fd for relaying data to target
-    int middle_fd = -1;
+    int middle_fd = 0;
     struct pollfd fds[3] = {
         [0] = {.fd = tcp_fd, .events = POLLIN},
         [1] = {.fd = udp_fd, .events = POLLIN},
         [2] = {.fd = middle_fd, .events = POLLOUT},
     };
 
-    int n;
+    const rsv_hdr_size = 2 + 1 + 1 + 1 + 255 + 2;
+    ssize_t n;
     int poll_fds = 2;
     while(1) {
         switch(poll(fds, poll_fds, 60*15*1000)) {
@@ -370,13 +375,24 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 return;
         }
         char buf[4096];  // support up to 4K worth of UDP message
+        // TCP socket
         if (fds[0].revents & POLLIN) {
-            if (read(fds[0].fd, buf, sizeof(buf)) == 0) {
+            n = read(fds[0].fd, buf, sizeof(buf) - 1);
+            if (n == 0) {
                 // SOCKS5 TCP connection closed
                 if (middle_fd > 0) close(middle_fd);
                 return;
             }
+            if (n == -1) {
+                if(errno == EINTR || errno == EAGAIN) continue;
+                else perror("read");
+                if (middle_fd > 0) close(middle_fd);
+                return;
+            }
+            buf[n - 1] = '\0';
+            dprintf(1, "received unexpectedly from TCP socket on UDP associate: %s", buf);
         }
+        // client UDP socket
         if (fds[1].revents & POLLIN) {
             union sockaddr_union addr;
             n = recv(udp_fd, buf, sizeof(buf), 0);
@@ -390,36 +406,43 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
             union sockaddr_union target_addr;
             char* data;
             n = extract_udp_data(buf, n, &target_addr, &data);
-            if (middle_fd < 0) {
-                middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
-                poll_fds = 3;
-                if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
-                    if (-1 == bindtoip(middle_fd, &bind_addr)) {
-                        perror("bindtoip");
-                        close(middle_fd);
-                        return;
+            if (n < 0) {
+                close(middle_fd);
+                dprintf(2, "failed to extract udp data, %d", n);
+                return;
+            }
+            if (n > 0) {
+                if (middle_fd == 0) {
+                    middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
+                    poll_fds = 3;
+                    if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
+                        if (-1 == bindtoip(middle_fd, &bind_addr)) {
+                            perror("bindtoip");
+                            close(middle_fd);
+                            return;
+                        }
                     }
                 }
-            }
-            n = sendto(middle_fd, data, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
-            if (n < 0) {
-                perror("sendto");
-                close(middle_fd);
-                return;
+                n = sendto(middle_fd, data, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
+                if (n < 0) {
+                    perror("sendto");
+                    close(middle_fd);
+                    return;
+                }
             }
         }
 
         if (fds[2].revents & POLLIN) {
             union sockaddr_union remote_addr;
-            ssize_t n = recvfrom(middle_fd, buf, sizeof buf, 0, (struct sockaddr*)&remote_addr, sizeof(remote_addr));
+            n = recvfrom(middle_fd, buf + rsv_hdr_size, sizeof(buf) - rsv_hdr_size, 0, (struct sockaddr*)&remote_addr, sizeof(remote_addr));
             if(n <= 0) {
                 perror("read from middle_fd");
+                close(middle_fd);
                 return;
             }
-            prepare_udp_data(buf, n, , );
-            ssize_t m = write(outfd, buf+sent, n-sent);
+            prepare_udp_data(buf, n, rsv_hdr_size, &remote_addr);
+            ssize_t m = write(udp_fd, buf, n);
             if(m < 0) return;
-            sent += m;
         }
     }
 
@@ -444,7 +467,7 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 
 unsigned short pick_random_port() { return 10000; }
 
-int udp_svc_setup(union sockaddr_union* local_addr) {
+int udp_svc_setup(union sockaddr_union* client_addr) {
     int fd = socket(SOCKADDR_UNION_AF(&bind_addr), SOCK_DGRAM, 0);
     if(fd == -1) {
         eval_errno:
@@ -469,8 +492,10 @@ int udp_svc_setup(union sockaddr_union* local_addr) {
                 return -EC_GENERAL_FAILURE;
         }
     }
-    if(bindtoip(fd, local_addr) == -1)
-        goto eval_errno;
+    if (connect(fd, (const struct sockaddr*)client_addr, sizeof(union sockaddr_union))) {
+        perror("connect");
+        return -1;
+    }
 
     return fd;
 }
@@ -483,12 +508,7 @@ static void* clientthread(void *data) {
     int ret;
     // for CONNECT, this is target TCP address
     // for UDP ASSOCIATE, this is client UDP address
-    struct service_addr svc_addr = {
-        .type = SOCKS5_ADDR_UNKNOWN,
-        .host = NULL,
-        .port = 0,
-    };
-    union sockaddr_union address;
+    union sockaddr_union address, local_addr;
     struct addrinfo* remote;
 
     enum authmethod am;
@@ -527,7 +547,6 @@ static void* clientthread(void *data) {
                         goto breakloop;
                     }
                     int remotefd = ret;
-                     union sockaddr_union local_addr;
                     if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
                         local_addr = bind_addr;
                     } else {
@@ -547,7 +566,10 @@ static void* clientthread(void *data) {
                         send_error(t->client.fd, fd*-1);
                         goto breakloop;
                     }
-                    if (-1 == send_response(t->client.fd, EC_SUCCESS, &bind_addr)) {
+
+                    socklen_t len = sizeof(union sockaddr_union);
+                    if (getsockname(fd, (struct sockaddr*)&local_addr, &len)) return -EC_GENERAL_FAILURE;
+                    if (-1 == send_response(t->client.fd, EC_SUCCESS, &local_addr)) {
                         close(fd);
                         goto breakloop;
                     }
@@ -561,10 +583,6 @@ static void* clientthread(void *data) {
         }
     }
 breakloop:
-    if (svc_addr.host != NULL) {
-        free(svc_addr.host);
-    }
-
     if (!remote) freeaddrinfo(remote);
 
     close(t->client.fd);
