@@ -500,6 +500,8 @@ int main(int argc, char** argv) {
 		}
 		if (idle_timeout && fcntl(c.fd, F_SETFL, fcntl(c.fd, F_GETFL, 0) & ~O_NONBLOCK)) {
 			perror("fcntl ~O_NONBLOCK");
+			close(c.fd);
+			free(curr);
 			continue;
 		}
 		curr->client = c;
