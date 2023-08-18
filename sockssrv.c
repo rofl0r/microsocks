@@ -498,6 +498,10 @@ int main(int argc, char** argv) {
 			usleep(FAILURE_TIMEOUT);
 			continue;
 		}
+		if (idle_timeout && fcntl(c.fd, F_SETFL, fcntl(c.fd, F_GETFL, 0) & ~O_NONBLOCK)) {
+			perror("fcntl ~O_NONBLOCK");
+			continue;
+		}
 		curr->client = c;
 		if(!sblist_add(threads, &curr)) {
 			close(curr->client.fd);
