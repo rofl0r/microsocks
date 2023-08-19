@@ -71,3 +71,21 @@ int sblist_add(sblist* l, void* item) {
     l->count++;
     return sblist_set(l, item, l->count - 1);
 }
+
+void sblist_delete(sblist* l, size_t item) {
+    if (l->count && item < l->count) {
+        memmove(sblist_item_from_index(l, item), sblist_item_from_index(l, item + 1), (sblist_getsize(l) - (item + 1)) * l->itemsize);
+        l->count--;
+    }
+}
+
+int sblist_search(sblist* l, char* item1, item_compare cmp) {
+    size_t i;
+    for (i = 0; i < l->count; i++) {
+        char* item2 = sblist_item_from_index(l, i);
+        if (0 == compare(item1, item2)) {
+            return i;
+        }
+    }
+    return -1;
+}

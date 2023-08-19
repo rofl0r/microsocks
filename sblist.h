@@ -58,6 +58,10 @@ void sblist_sort(sblist *l, int (*compar)(const void *, const void *));
 /* insert element into presorted list, returns listindex of new entry or -1*/
 size_t sblist_insert_sorted(sblist* l, void* o, int (*compar)(const void *, const void *));
 
+typedef int (*item_compare)(char* item1, char* item2);
+
+int sblist_search(sblist* l, char* item1, item_compare cmp);
+
 #ifndef __COUNTER__
 #define __COUNTER__ __LINE__
 #endif

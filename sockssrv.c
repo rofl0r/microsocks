@@ -68,7 +68,6 @@ static const char* auth_pass;
 static sblist* auth_ips;
 static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
-static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
 
 struct thread {
     pthread_t pt;
@@ -94,14 +93,6 @@ struct service_addr {
 #else
 static void dolog(const char* fmt, ...) { }
 #endif
-
-static struct addrinfo* addr_choose(struct addrinfo* list, int af) {
-    if(af == AF_UNSPEC) return list;
-    struct addrinfo* p;
-    for(p=list; p; p=p->ai_next)
-        if(p->ai_family == af) break;
-    return p;
-}
 
 static int parse_addrport(unsigned char *buf, size_t n, enum socks5_socket_type socktype, union sockaddr_union* addr) {
     if (n < 2) return -EC_GENERAL_FAILURE;
@@ -141,12 +132,9 @@ static int parse_addrport(unsigned char *buf, size_t n, enum socks5_socket_type 
     } else {
         abort();
     }
-    struct addrinfo* raddr = addr_choose(remote, SOCKADDR_UNION_AF(&bind_addr));
-    if (!raddr) {
-        freeaddrinfo(remote);
-        return EC_ADDRESSTYPE_NOT_SUPPORTED;
-    }
-    memcpy(addr, raddr->ai_addr, raddr->ai_addrlen);
+
+    memcpy(addr, remote->ai_addr, remote->ai_addrlen);
+    freeaddrinfo(remote);
     return minlen;
 }
 
@@ -187,10 +175,6 @@ static int connect_socks_target(union sockaddr_union* remote_addr, struct client
             perror("socket/connect");
             return -EC_GENERAL_FAILURE;
         }
-    }
-    if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
-        if(bindtoip(fd, &bind_addr) == -1)
-            goto eval_errno;
     }
     if(connect(fd, SOCKADDR_UNION_ADDRESS(remote_addr), SOCKADDR_UNION_LENGTH(remote_addr)) == -1)
         goto eval_errno;
@@ -415,13 +399,6 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 if (middle_fd == 0) {
                     middle_fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
                     poll_fds = 3;
-                    if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
-                        if (-1 == bindtoip(middle_fd, &bind_addr)) {
-                            perror("bindtoip");
-                            close(middle_fd);
-                            return;
-                        }
-                    }
                 }
                 n = sendto(middle_fd, data, n, 0, (const struct sockaddr*)&target_addr, sizeof(target_addr));
                 if (n < 0) {
@@ -468,7 +445,7 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 unsigned short pick_random_port() { return 10000; }
 
 int udp_svc_setup(union sockaddr_union* client_addr) {
-    int fd = socket(SOCKADDR_UNION_AF(&bind_addr), SOCK_DGRAM, 0);
+    int fd = socket(SOCKADDR_UNION_AF(client_addr), SOCK_DGRAM, 0);
     if(fd == -1) {
         eval_errno:
         if(fd != -1) close(fd);
@@ -547,12 +524,8 @@ static void* clientthread(void *data) {
                         goto breakloop;
                     }
                     int remotefd = ret;
-                    if (SOCKADDR_UNION_AF(&bind_addr) != AF_UNSPEC) {
-                        local_addr = bind_addr;
-                    } else {
-                        socklen_t len = sizeof(union sockaddr_union);
-                        if (getsockname(remotefd, (struct sockaddr*)&local_addr, &len)) return -EC_GENERAL_FAILURE;
-                    }
+                    socklen_t len = sizeof(union sockaddr_union);
+                    if (getsockname(remotefd, (struct sockaddr*)&local_addr, &len)) return -EC_GENERAL_FAILURE;
                     if (-1 == send_response(t->client.fd, EC_SUCCESS, &local_addr)) {
                         close(remotefd);
                         goto breakloop;
@@ -633,16 +606,13 @@ int main(int argc, char** argv) {
     int ch;
     const char *listenip = "0.0.0.0";
     unsigned port = 1080;
-    while((ch = getopt(argc, argv, ":1qb:i:p:u:P:")) != -1) {
+    while((ch = getopt(argc, argv, ":1qi:p:u:P:")) != -1) {
         switch(ch) {
             case '1':
                 auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
                 break;
             case 'q':
                 quiet = 1;
-                break;
-            case 'b':
-                resolve_sa(optarg, &bind_addr);
                 break;
             case 'u':
                 auth_user = strdup(optarg);
