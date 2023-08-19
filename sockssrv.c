@@ -310,8 +310,8 @@ static void copyloop(int fd1, int fd2) {
     }
 }
 
-// caller must free socks_rawaddr manually
-static ssize_t extract_udp_data(char* buf, ssize_t n, void** socks5_rawaddr, union sockaddr_union* target_addr, char** data) {
+// caller must free socks5_addr manually
+static ssize_t extract_udp_data(char* buf, ssize_t n, void** socks5_addr, union sockaddr_union* target_addr, char** data) {
     if (n < 3) return -EC_GENERAL_FAILURE;
     if (buf[0] != RSV || buf[1] != RSV) return -EC_GENERAL_FAILURE;
     if (buf[2] != RSV) return -EC_GENERAL_FAILURE;  // framentation not supported
@@ -321,8 +321,8 @@ static ssize_t extract_udp_data(char* buf, ssize_t n, void** socks5_rawaddr, uni
     if (offset < 0) {
         return offset;
     }
-    *socks5_rawaddr = malloc(offset);
-    memcpy(*socks5_rawaddr, buf, offset);
+    *socks5_addr = malloc(offset);
+    memcpy(*socks5_addr, buf, offset);
     *data = buf + offset;
     n -= offset;
     return n;
@@ -360,14 +360,16 @@ int compare_fd_socks5addr_by_addr(char* item1, char* item2) {
 
 static void copy_loop_udp(int tcp_fd, int udp_fd) {
     // add tcp_fd and udp_fd to poll    
+    int poll_fds = 2;
     struct pollfd fds[1024] = {
         [0] = {.fd = tcp_fd, .events = POLLIN},
         [1] = {.fd = udp_fd, .events = POLLIN},
     };
 
     ssize_t n;
-    int poll_fds = 2;
     struct fd_socks5addr item;
+    // RSV(2) + FRAG(1) + ATYP(1) + DST.ADDR(1 + MAX_DNS_LEN) + DST.PORT(2)
+    const max_header_size = 2 + 1 + 1 + 1 + MAX_DNS_LEN + 2;
 
     struct sblist* sock_list = sblist_new(sizeof(struct fd_socks5addr), 2);
     while(1) {
@@ -423,21 +425,21 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 if (idx != -1) {
                     struct fd_socks5addr* item = (struct fd_socks5addr*)sblist_item_from_index(sock_list, idx);
                     send_fd = item->fd;
+                    item->socks5_addr = NULL;
                     free(socks5_addr);
                 } else {
                     // create a new socket
                     int fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
                     if (connect(fd, (const struct sockaddr*)&target_addr, sizeof(target_addr))) {
                         perror("connect");
-                        // send_error();
+                        send_error(tcp_fd, EC_GENERAL_FAILURE);
                         // just out of fd1
                     }
-                    struct fd_socks5addr* item = malloc(sizeof(struct fd_socks5addr));
                     // save the data into buffer list
-                    item->fd = fd;
+                    item.fd = fd;
                     // no need to free socks5_addr now
-                    item->socks5_addr = socks5_addr;
-                    item->addr_len = strlen(socks5_addr);
+                    item.socks5_addr = socks5_addr;
+                    item.addr_len = strlen(socks5_addr);
                     sblist_add(sock_list, &item);
                     // add to polling fds
                     fds[poll_fds].fd = fd;
@@ -466,21 +468,26 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 void* socks5_addr = item->socks5_addr;
                 int len = item->addr_len;
 
-                union sockaddr_union remote_addr;
-                n = recv(fds[i].fd, buf, sizeof(buf) - rsv_hdr_size, 0);
+                int header_size = 2 + 1 + len;
+                buf[0] = RSV, buf[1] = RSV;
+                buf[2] = 0; // FRAG
+                memcpy(buf + 3, item->socks5_addr, len);
+                n = recv(fds[i].fd, buf + header_size, sizeof(buf) - header_size, 0);
                 if(n <= 0) {
                     perror("read from middle_fd");
-                    close(middle_fd);
-                    return;
+                    goto UDP_LOOP_END;
                 }
-                prepare_udp_data(buf, n, rsv_hdr_size, &remote_addr);
-                ssize_t m = write(udp_fd, buf, n);
-                if(m < 0) return;
+                ssize_t m = write(udp_fd, buf, header_size + n);
+                if(m < 0) {
+                    perror("write to udp_fd");
+                    goto UDP_LOOP_END;
+                }
             }
         }
     }
 UDP_LOOP_END:
-    return;
+    int i;
+    for (i = 2; i < poll_fds; i++) close(fds[i].fd);
 }
 
 static enum errorcode check_credentials(unsigned char* buf, size_t n) {
