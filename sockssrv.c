@@ -24,6 +24,7 @@
 #define _GNU_SOURCE
 #include <unistd.h>
 #define _POSIX_C_SOURCE 200809L
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -97,7 +98,6 @@ static void dolog(const char* fmt, ...) { }
 static int parse_addrport(unsigned char *buf, size_t n, enum socks5_socket_type socktype, union sockaddr_union* addr) {
     if (n < 2) return -EC_GENERAL_FAILURE;
     int af = AF_INET;
-    int offset = 0;
     int minlen = 1 + 4 + 2, l;
     char namebuf[256];
 
@@ -251,20 +251,23 @@ static void send_auth_response(int fd, int version, enum authmethod meth) {
 }
 
 static ssize_t send_response(int fd, enum errorcode ec, union sockaddr_union* addr) {
+    void* addr_ptr = SOCKADDR_UNION_ADDRESS(addr);
+    assert(addr_ptr != NULL);
+    unsigned short port = SOCKADDR_UNION_PORT(addr);
     // IPv6 takes 22 bytes, which is the longest
-    char buf[4 + 16 + 2] = {VERSION, ec, RSV};
+    unsigned char buf[4 + 16 + 2] = {VERSION, ec, RSV};
     size_t len = 0;
     if (SOCKADDR_UNION_AF(addr) == AF_INET) {
         buf[3] = SOCKS5_IPV4;
-        memcpy(buf+4, SOCKADDR_UNION_ADDRESS(addr), 4);
-        buf[8] = SOCKADDR_UNION_PORT(addr) >> 8;
-        buf[9] = SOCKADDR_UNION_PORT(addr) | 0xFF;
+        memcpy(buf+4, addr_ptr, 4);
+        buf[8] = port >> 8;
+        buf[9] = port | 0xFF;
         len = 10;
     } else if (SOCKADDR_UNION_AF(addr) == AF_INET6) {
         buf[3] = SOCKS5_IPV6;
-        memcpy(buf+4, SOCKADDR_UNION_ADDRESS(addr), 16);
-        buf[20] = SOCKADDR_UNION_PORT(addr) >> 8;
-        buf[21] = SOCKADDR_UNION_PORT(addr) | 0xFF;
+        memcpy(buf+4, addr_ptr, 16);
+        buf[20] = port >> 8;
+        buf[21] = port | 0xFF;
         len = 22;
     } else {
         abort();
@@ -311,7 +314,7 @@ static void copyloop(int fd1, int fd2) {
 }
 
 // caller must free socks5_addr manually
-static ssize_t extract_udp_data(char* buf, ssize_t n, void** socks5_addr, size_t* socks5_addr_len, union sockaddr_union* target_addr) {
+static ssize_t extract_udp_data(unsigned char* buf, ssize_t n, void** socks5_addr, size_t* socks5_addr_len, union sockaddr_union* target_addr) {
     if (n < 3) return -EC_GENERAL_FAILURE;
     if (buf[0] != RSV || buf[1] != RSV) return -EC_GENERAL_FAILURE;
     if (buf[2] != 0) return -EC_GENERAL_FAILURE;  // framentation not supported
@@ -328,15 +331,6 @@ static ssize_t extract_udp_data(char* buf, ssize_t n, void** socks5_addr, size_t
     memcpy(*socks5_addr, buf + offset, ret);
     offset += ret;
     return offset;
-}
-
-// the returned buffer must be manually freed
-static ssize_t prepare_udp_data(char* data, ssize_t n1, int reserved_size, union sockaddr_union* client_addr) {
-    const reserved = 0;
-    char buf[reserved];
-    buf[0] = RSV, buf[1]= RSV;
-
-    return 0;
 }
 
 struct fd_socks5addr {
@@ -370,7 +364,7 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
 
     ssize_t n, ret;
     struct fd_socks5addr item;
-    struct sblist* sock_list = sblist_new(sizeof(struct fd_socks5addr), 1);
+    sblist* sock_list = sblist_new(sizeof(struct fd_socks5addr), 1);
     while(1) {
         switch(poll(fds, poll_fds, 60*15*1000)) {
             case 0:
@@ -382,7 +376,7 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
         }
 
          // TODO: only support up to around 4K size of UDP message
-        char buf[4096];
+        unsigned char buf[4096];
         // TCP socket
         if (fds[0].revents & POLLIN) {
             n = read(fds[0].fd, buf, sizeof(buf) - 1);
@@ -413,13 +407,13 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
             size_t socks5_addr_len;
             ssize_t offset = extract_udp_data(buf, n, &socks5_addr, &socks5_addr_len, &target_addr);
             if (offset < 0) {
-                dprintf(2, "failed to extract from udp packet %d", offset);
+                dprintf(2, "failed to extract from udp packet %ld", offset);
                 goto UDP_LOOP_END;
             }
             int send_fd = 0;
             item.socks5_addr = socks5_addr;
             item.addr_len = socks5_addr_len;
-            int idx = sblist_search(sock_list, &item, compare_fd_socks5addr_by_addr);
+            int idx = sblist_search(sock_list, (char*)&item, compare_fd_socks5addr_by_addr);
             if (idx != -1) {
                 free(socks5_addr);
                 struct fd_socks5addr* item_found = (struct fd_socks5addr*)sblist_item_from_index(sock_list, idx);
@@ -453,19 +447,17 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
         for (i = 0; i < poll_fds; i++) {
             if (fds[i].revents & POLLIN) {
                 item.fd = fds[i].fd;
-                int idx = sblist_search(sock_list, &item, compare_fd_socks5addr_by_fd);
+                int idx = sblist_search(sock_list, (char *)&item, compare_fd_socks5addr_by_fd);
                 if (idx == -1) {
                     perror("UDP socket not found");
                     goto UDP_LOOP_END;
                 }
                 struct fd_socks5addr *item = (struct fd_socks5addr*)sblist_item_from_index(sock_list, idx);
-                void* socks5_addr = item->socks5_addr;
-                size_t socks5_addr_len = item->addr_len;
 
                 buf[0] = RSV, buf[1] = RSV;
                 buf[2] = 0; // FRAG
-                memcpy(buf + 3, item->socks5_addr, socks5_addr_len);
-                size_t header_size = 3 + socks5_addr_len;
+                memcpy(buf + 3, item->socks5_addr, item->addr_len);
+                size_t header_size = 3 + item->addr_len;
                 n = recv(fds[i].fd, buf + header_size, sizeof(buf) - header_size, 0);
                 if(n <= 0) {
                     perror("recv from target address");
@@ -506,7 +498,6 @@ unsigned short pick_random_port() { return 10000; }
 int udp_svc_setup(union sockaddr_union* client_addr) {
     int fd = socket(SOCKADDR_UNION_AF(client_addr), SOCK_DGRAM, 0);
     if(fd == -1) {
-        eval_errno:
         if(fd != -1) close(fd);
         switch(errno) {
             case ETIMEDOUT:
@@ -583,7 +574,7 @@ static void* clientthread(void *data) {
                     }
                     int remotefd = ret;
                     socklen_t len = sizeof(union sockaddr_union);
-                    if (getsockname(remotefd, (struct sockaddr*)&local_addr, &len)) return -EC_GENERAL_FAILURE;
+                    if (getsockname(remotefd, (struct sockaddr*)&local_addr, &len)) goto breakloop;
                     if (-1 == send_response(t->client.fd, EC_SUCCESS, &local_addr)) {
                         close(remotefd);
                         goto breakloop;
@@ -599,7 +590,7 @@ static void* clientthread(void *data) {
                     }
 
                     socklen_t len = sizeof(union sockaddr_union);
-                    if (getsockname(fd, (struct sockaddr*)&local_addr, &len)) return -EC_GENERAL_FAILURE;
+                    if (getsockname(fd, (struct sockaddr*)&local_addr, &len)) goto breakloop;
                     if (-1 == send_response(t->client.fd, EC_SUCCESS, &local_addr)) {
                         close(fd);
                         goto breakloop;

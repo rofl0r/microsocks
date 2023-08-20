@@ -5,7 +5,7 @@ prefix = /usr/local
 bindir = $(prefix)/bin
 
 PROG = microsocks
-SRCS =  sockssrv.c server.c sblist.c sblist_delete.c
+SRCS =  sockssrv.c server.c sblist.c
 OBJS = $(SRCS:.c=.o)
 
 LIBS = -lpthread

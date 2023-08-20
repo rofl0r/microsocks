@@ -91,6 +91,4 @@ int sblist_search(sblist* l, char* item1, item_compare cmp);
 }
 #endif
 
-#pragma RcB2 DEP "sblist.c" "sblist_delete.c"
-
 #endif

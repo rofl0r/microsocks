@@ -8,8 +8,6 @@
 #include <netdb.h>
 #include <netinet/in.h>
 
-#pragma RcB2 DEP "server.c"
-
 union sockaddr_union {
     struct sockaddr_in  v4;
     struct sockaddr_in6 v6;
