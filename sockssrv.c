@@ -189,7 +189,7 @@ static int connect_socks_target(union sockaddr_union* remote_addr, struct client
         ipdata = SOCKADDR_UNION_ADDRESS(remote_addr);
         inet_ntop(af, ipdata, targetname, sizeof targetname);
         dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, 
-            targetname, SOCKADDR_UNION_PORT(remote_addr));
+            targetname, ntohs(SOCKADDR_UNION_PORT(remote_addr)));
     }
     return fd;
 }
@@ -253,7 +253,7 @@ static void send_auth_response(int fd, int version, enum authmethod meth) {
 static ssize_t send_response(int fd, enum errorcode ec, union sockaddr_union* addr) {
     void* addr_ptr = SOCKADDR_UNION_ADDRESS(addr);
     assert(addr_ptr != NULL);
-    unsigned short port = SOCKADDR_UNION_PORT(addr);
+    unsigned short port = ntohs(SOCKADDR_UNION_PORT(addr));
     // IPv6 takes 22 bytes, which is the longest
     unsigned char buf[4 + 16 + 2] = {VERSION, ec, RSV};
     size_t len = 0;
@@ -261,13 +261,13 @@ static ssize_t send_response(int fd, enum errorcode ec, union sockaddr_union* ad
         buf[3] = SOCKS5_IPV4;
         memcpy(buf+4, addr_ptr, 4);
         buf[8] = port >> 8;
-        buf[9] = port | 0xFF;
+        buf[9] = port & 0xFF;
         len = 10;
     } else if (SOCKADDR_UNION_AF(addr) == AF_INET6) {
         buf[3] = SOCKS5_IPV6;
         memcpy(buf+4, addr_ptr, 16);
         buf[20] = port >> 8;
-        buf[21] = port | 0xFF;
+        buf[21] = port & 0xFF;
         len = 22;
     } else {
         abort();
@@ -594,6 +594,19 @@ static void* clientthread(void *data) {
                     if (-1 == send_response(t->client.fd, EC_SUCCESS, &local_addr)) {
                         close(fd);
                         goto breakloop;
+                    }
+                    if (CONFIG_LOG) {
+                        char clientname[256];
+                        int af = SOCKADDR_UNION_AF(&address);
+                        void *ipdata = SOCKADDR_UNION_ADDRESS(&address);
+                        unsigned short port_c = ntohs(SOCKADDR_UNION_PORT(&address));
+                        inet_ntop(af, ipdata, clientname, sizeof clientname);
+                        char udp_svc_name[256];
+                        ipdata = SOCKADDR_UNION_ADDRESS(&local_addr);
+                        unsigned int port_s = ntohs(SOCKADDR_UNION_PORT(&local_addr));
+                        inet_ntop(af, ipdata, udp_svc_name, sizeof udp_svc_name);
+                        dolog("client[%d] uses UDP address %s:%d, local UDP bind address is %s:%d\n", t->client.fd, clientname, port_c, 
+                            udp_svc_name, port_s);
                     }
                     copy_loop_udp(t->client.fd, fd);
                     close(fd);
