@@ -410,6 +410,16 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 dprintf(2, "failed to extract from udp packet %ld", offset);
                 goto UDP_LOOP_END;
             }
+
+            if (CONFIG_LOG) {
+                char targetname[256];
+                int af = SOCKADDR_UNION_AF(&target_addr);
+                void *ipdata = SOCKADDR_UNION_ADDRESS(&target_addr);
+                unsigned short port = ntohs(SOCKADDR_UNION_PORT(&target_addr));
+                inet_ntop(af, ipdata, targetname, sizeof targetname);
+                dolog("UDP target address is %s:%d\n", targetname, port);
+            }
+
             int send_fd = 0;
             item.socks5_addr = socks5_addr;
             item.addr_len = socks5_addr_len;
@@ -421,7 +431,7 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
             } else {
                 // create a new socket
                 int fd = socket(SOCKADDR_UNION_AF(&target_addr), SOCK_DGRAM, 0);
-                if (connect(fd, (const struct sockaddr*)&target_addr, sizeof(target_addr))) {
+                if (-1 == connect(fd, (const struct sockaddr*)&target_addr, sizeof(target_addr))) {
                     perror("connect");
                     send_error(tcp_fd, EC_GENERAL_FAILURE);
                     goto UDP_LOOP_END;
@@ -434,6 +444,15 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 fds[poll_fds].events = POLL_IN;
                 poll_fds++;
                 send_fd = fd;
+                if (CONFIG_LOG) {
+                        char targetname[256];
+                        int af = SOCKADDR_UNION_AF(&target_addr);
+                        void *ipdata = SOCKADDR_UNION_ADDRESS(&target_addr);
+                        unsigned short port = ntohs(SOCKADDR_UNION_PORT(&target_addr));
+                        inet_ntop(af, ipdata, targetname, sizeof targetname);
+                        dolog("UDP fd[%d] remote address is %s:%d\n", send_fd, targetname, port);
+                    }
+
             }
             ssize_t ret = send(send_fd, buf + offset, n - offset, 0);
             if (ret < 0) {
@@ -444,12 +463,12 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
 
         // UDP sockets for target addresses
         int i;
-        for (i = 0; i < poll_fds; i++) {
+        for (i = 2; i < poll_fds; i++) {
             if (fds[i].revents & POLLIN) {
                 item.fd = fds[i].fd;
                 int idx = sblist_search(sock_list, (char *)&item, compare_fd_socks5addr_by_fd);
                 if (idx == -1) {
-                    perror("UDP socket not found");
+                    dprintf(2, "UDP socket not found");
                     goto UDP_LOOP_END;
                 }
                 struct fd_socks5addr *item = (struct fd_socks5addr*)sblist_item_from_index(sock_list, idx);
