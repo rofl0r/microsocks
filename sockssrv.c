@@ -176,7 +176,7 @@ static int connect_socks_target(union sockaddr_union* remote_addr, struct client
             return -EC_GENERAL_FAILURE;
         }
     }
-    if(connect(fd, SOCKADDR_UNION_ADDRESS(remote_addr), SOCKADDR_UNION_LENGTH(remote_addr)) == -1)
+    if(connect(fd, (struct sockaddr*)remote_addr, SOCKADDR_UNION_LENGTH(remote_addr)) == -1)
         goto eval_errno;
 
     if(CONFIG_LOG) {
