@@ -515,6 +515,19 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 unsigned short pick_random_port() { return 10000; }
 
 int udp_svc_setup(union sockaddr_union* client_addr) {
+    // explicitly disallow 0.0.0.0 IPv4 and ::0 IPv6
+    if (SOCKADDR_UNION_AF(client_addr) == AF_INET) {
+        if (client_addr->v4.sin_addr.s_addr == INADDR_ANY) {
+            return -EC_ADDRESSTYPE_NOT_SUPPORTED;
+        } 
+    } else if (SOCKADDR_UNION_AF(client_addr) == AF_INET6) {
+        if (IN6_ARE_ADDR_EQUAL(&client_addr->v6.sin6_addr, &in6addr_any)) {
+            return -EC_ADDRESSTYPE_NOT_SUPPORTED;
+        } 
+    } else {
+            return -EC_ADDRESSTYPE_NOT_SUPPORTED;
+    }
+
     int fd = socket(SOCKADDR_UNION_AF(client_addr), SOCK_DGRAM, 0);
     if(fd == -1) {
         if(fd != -1) close(fd);
