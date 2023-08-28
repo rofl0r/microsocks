@@ -516,14 +516,29 @@ static void copy_loop_udp(int tcp_fd, int udp_fd) {
                 struct socks5_addrport* addrport =  item->addrport;
                 buf[3] = addrport->type;
                 size_t offset = 4;
-                size_t len = strlen(item->addrport->addr);
                 if (addrport->type == SOCKS5_DNS) {
+                    size_t len = strlen(item->addrport->addr);
                     buf[offset++] = len;
                     memcpy(buf + offset, addrport->addr, len);
+                } else if (addrport->type == SOCKS5_IPV4) {
+                    struct in_addr addr_in4;
+                    if (1 != inet_pton(AF_INET, addrport->addr, &addr_in4)) {
+                        dprintf(2, "invalid IPv4 address, %s", addrport->addr);
+                        goto UDP_LOOP_END;
+                    }
+                    memcpy(buf + offset, &addr_in4, sizeof addr_in4);
+                    offset += sizeof addr_in4;
+                } else if (addrport->type == SOCKS5_IPV6) {
+                    struct in6_addr addr_in6;
+                    if (1 != inet_pton(AF_INET6, addrport->addr, &addr_in6)) {
+                        dprintf(2, "invalid IPv6 address, %s", addrport->addr);
+                        goto UDP_LOOP_END;
+                    }
+                    memcpy(buf + offset, &addr_in6, sizeof addr_in6);
+                    offset += sizeof addr_in6;
                 } else {
-                    memcpy(buf + 4, addrport->addr, len);
+                    abort();
                 }
-                offset += len;
                 buf[offset++] = addrport->port >> 8;
                 buf[offset++] = addrport->port & 0xFF;
                 n = recv(fds[i].fd, buf + offset, sizeof(buf) - offset, 0);
