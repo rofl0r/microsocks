@@ -193,7 +193,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		char clientname[256];
 		af = SOCKADDR_UNION_AF(&client->addr);
 		void *ipdata = SOCKADDR_UNION_ADDRESS(&client->addr);
-		inet_ntop(af, ipdata, clientname, sizeof clientname);
+		if(!inet_ntop(af, ipdata, clientname, sizeof clientname))
+			strcpy(clientname, "");
 		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
 	}
 	return fd;
