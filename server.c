@@ -1,7 +1,11 @@
 #include "server.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stddef.h>
+#include <errno.h>
 #include <unistd.h>
+#include <sys/un.h>
 
 int resolve(const char *host, unsigned short port, struct addrinfo** addr) {
 	struct addrinfo hints = {
@@ -59,6 +63,43 @@ int server_setup(struct server *server, const char* listenip, unsigned short por
 		close(listenfd);
 		return -3;
 	}
+	server->fd = listenfd;
+	return 0;
+}
+
+int server_setup_unix(struct server *server, const char* path) {
+	socklen_t addrlen = offsetof(struct sockaddr_un, sun_path) + strlen(path) + 1;
+	if(addrlen < strlen(path)) { // not possible in practice
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+
+	struct sockaddr_un *addr = calloc(1, addrlen);
+	if(!addr) {
+		return -1;
+	}
+	addr->sun_family = AF_UNIX;
+	strcpy(addr->sun_path, path);
+
+	int listenfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (listenfd < 0) {
+		free(addr);
+		return -2;
+	}
+
+	// note: binding to "" lets the kernel choose a random address, just like IP port 0
+	if(bind(listenfd, (struct sockaddr*)addr, addrlen) < 0) {
+		close(listenfd);
+		free(addr);
+		return -2;
+	}
+	free(addr);
+
+	if(listen(listenfd, SOMAXCONN) < 0) {
+		close(listenfd);
+		return -3;
+	}
+
 	server->fd = listenfd;
 	return 0;
 }
