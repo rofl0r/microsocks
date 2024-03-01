@@ -21,9 +21,10 @@
 
 */
 
-#define _GNU_SOURCE
-#include <unistd.h>
+#undef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -402,6 +403,10 @@ static void zero_arg(char *s) {
 }
 
 int main(int argc, char** argv) {
+	struct timespec ts_timeout = {
+		.tv_sec  =  FAILURE_TIMEOUT / 1000000,
+		.tv_nsec = (FAILURE_TIMEOUT % 1000000) * 1000
+	};
 	int ch;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
@@ -463,7 +468,7 @@ int main(int argc, char** argv) {
 		if(server_waitclient(&s, &c)) {
 			dolog("failed to accept connection\n");
 			free(curr);
-			usleep(FAILURE_TIMEOUT);
+			nanosleep(&ts_timeout, NULL);
 			continue;
 		}
 		curr->client = c;
@@ -472,7 +477,7 @@ int main(int argc, char** argv) {
 			free(curr);
 			oom:
 			dolog("rejecting connection due to OOM\n");
-			usleep(FAILURE_TIMEOUT); /* prevent 100% CPU usage in OOM situation */
+			nanosleep(&ts_timeout, NULL); /* prevent 100% CPU usage in OOM situation */
 			continue;
 		}
 		pthread_attr_t *a = 0, attr;
