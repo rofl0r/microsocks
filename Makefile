@@ -10,7 +10,10 @@ OBJS = $(SRCS:.c=.o)
 
 LIBS = -lpthread
 
-CFLAGS += -Wall -std=c99
+CFLAGS    = -std=c99 -Os
+
+CPPFLAGS  = -Wall -Wextra -pedantic
+CPPFLAGS += -Wshadow -Wno-unknown-pragmas
 
 INSTALL = ./install.sh
 
@@ -29,7 +32,7 @@ clean:
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(INC) $(PIC) -c -o $@ $<
 
 $(PROG): $(OBJS)
-	$(CC) $(LDFLAGS) $(OBJS) $(LIBS) -o $@
+	$(CC) $(LDFLAGS) $(CFLAGS) $(OBJS) $(LIBS) -o $@
 
 .PHONY: all clean install
 
