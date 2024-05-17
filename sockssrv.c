@@ -112,8 +112,8 @@ struct thread {
 static void dolog(const char* fmt, ...) { }
 #endif
 
-static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union* bind_addr) {
-	int af = SOCKADDR_UNION_AF(bind_addr);
+static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union* bindaddr) {
+	int af = SOCKADDR_UNION_AF(bindaddr);
 	if(af == AF_UNSPEC) return list;
 	struct addrinfo* p;
 	for(p=list; p; p=p->ai_next)
