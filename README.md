@@ -6,7 +6,7 @@ through them, if for some reason SSH doesn't cut it for you.
 
 It's very lightweight, and very light on resources too:
 
-for every client, a thread with a stack size of 8KB is spawned.
+for every client, a thread with a stack size of 16KB is spawned.
 the main process basically doesn't consume any resources at all.
 
 the only limits are the amount of file descriptors and the RAM.
@@ -41,7 +41,7 @@ libc is not even 50 KB. that's easily usable even on the cheapest routers.
 command line options
 --------------------
 
-    microsocks -1 -i listenip -p port -u user -P password -b bindaddr
+    microsocks -1 -q -i listenip -p port -u user -P password -b bindaddr
 
 all arguments are optional.
 by default listenip is 0.0.0.0 and port 1080.
@@ -56,6 +56,7 @@ for example, authenticate once using curl:
 
     curl --socks5 user:password@listenip:port anyurl
 
+option -q disables logging.
 
 Supported SOCKS5 Features
 -------------------------
