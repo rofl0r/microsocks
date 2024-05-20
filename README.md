@@ -6,7 +6,7 @@ through them, if for some reason SSH doesn't cut it for you.
 
 It's very lightweight, and very light on resources too:
 
-for every client, a thread with a stack size of 16KB is spawned.
+for every client, a thread with a low stack size is spawned.
 the main process basically doesn't consume any resources at all.
 
 the only limits are the amount of file descriptors and the RAM.
@@ -64,3 +64,13 @@ Supported SOCKS5 Features
 - IPv4, IPv6, DNS
 - TCP (no UDP at this time)
 
+Troubleshooting
+---------------
+
+if you experience segfaults, try raising the `THREAD_STACK_SIZE` in sockssrv.c
+for your platform in steps of 4KB.
+
+if this fixes your issue please file a pull request.
+
+microsocks uses the smallest safe thread stack size to minimize overall memory
+usage.
