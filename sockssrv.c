@@ -61,6 +61,7 @@
 #endif
 
 static int quiet;
+static int auth_once;
 static const char* auth_user;
 static const char* auth_pass;
 static sblist* auth_ips;
@@ -219,6 +220,13 @@ static int is_in_authed_list(union sockaddr_union *caddr) {
 }
 
 static void add_auth_ip(union sockaddr_union *caddr) {
+	if (CONFIG_LOG) {
+		char clientname[256];
+		int af = SOCKADDR_UNION_AF(caddr);
+		void* ipdata = SOCKADDR_UNION_ADDRESS(caddr);
+		inet_ntop(af, ipdata, clientname, sizeof clientname);
+		dolog("remote ip %s is now whitelisted\n", clientname);
+	}
 	sblist_add(auth_ips, caddr);
 }
 
@@ -230,7 +238,7 @@ static enum authmethod check_auth_method(unsigned char *buf, size_t n, struct cl
 	idx++;
 	while(idx < n && n_methods > 0) {
 		if(buf[idx] == AM_NO_AUTH) {
-			if(!auth_user) return AM_NO_AUTH;
+			if(!auth_ips && !auth_user) return AM_NO_AUTH;
 			else if(auth_ips) {
 				int authed = 0;
 				if(pthread_rwlock_rdlock(&auth_ips_lock) == 0) {
@@ -333,7 +341,7 @@ static void* clientthread(void *data) {
 				if(ret != EC_SUCCESS)
 					goto breakloop;
 				t->state = SS_3_AUTHED;
-				if(auth_ips && !pthread_rwlock_wrlock(&auth_ips_lock)) {
+				if(auth_once && !pthread_rwlock_wrlock(&auth_ips_lock)) {
 					if(!is_in_authed_list(&t->client.addr))
 						add_auth_ip(&t->client.addr);
 					pthread_rwlock_unlock(&auth_ips_lock);
@@ -380,11 +388,12 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P password -b bindaddr\n"
+		"usage: microsocks -1 -q -i listenip -p port -a allowip -u user -P password -b bindaddr\n"
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -q disables logging.\n"
 		"option -b specifies which ip outgoing connections are bound to\n"
+        "option -a allows the specific ip address without auth\n"
 		"option -1 activates auth_once mode: once a specific ip address\n"
 		"authed successfully with user/pass, it is added to a whitelist\n"
 		"and may use the proxy without auth.\n"
@@ -405,10 +414,11 @@ int main(int argc, char** argv) {
 	int ch;
 	const char *listenip = "0.0.0.0";
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:a:i:p:u:P:")) != -1) {
 		switch(ch) {
 			case '1':
-				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				if(!auth_ips) auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				auth_once = 1;
 				break;
 			case 'q':
 				quiet = 1;
@@ -416,6 +426,11 @@ int main(int argc, char** argv) {
 			case 'b':
 				resolve_sa(optarg, 0, &bind_addr);
 				break;
+            case 'a':
+				if(!auth_ips) auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				union sockaddr_union info;
+				if(!resolve_sa(optarg, 0, &info)) add_auth_ip(&info);
+                break;
 			case 'u':
 				auth_user = strdup(optarg);
 				zero_arg(optarg);
@@ -441,7 +456,7 @@ int main(int argc, char** argv) {
 		dprintf(2, "error: user and pass must be used together\n");
 		return 1;
 	}
-	if(auth_ips && !auth_pass) {
+	if(auth_once && !auth_pass) {
 		dprintf(2, "error: auth-once option must be used together with user/pass\n");
 		return 1;
 	}

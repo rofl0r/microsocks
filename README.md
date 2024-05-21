@@ -41,10 +41,14 @@ libc is not even 50 KB. that's easily usable even on the cheapest routers.
 command line options
 --------------------
 
-    microsocks -1 -q -i listenip -p port -u user -P password -b bindaddr
+    microsocks -1 -q -i listenip -p port -a allowip -u user -P password -b bindaddr
 
 all arguments are optional.
 by default listenip is 0.0.0.0 and port 1080.
+
+option -a only allows unauthenticated connections from the specified ip.
+if -a is specified without -u/-P, only the specified ip can connect.
+if -a is specified alongside -u/-p, anyone can connect with user/password.
 
 option -1 activates auth_once mode: once a specific ip address
 authed successfully with user/pass, it is added to a whitelist
