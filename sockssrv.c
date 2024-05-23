@@ -193,7 +193,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		char clientname[256];
 		af = SOCKADDR_UNION_AF(&client->addr);
 		void *ipdata = SOCKADDR_UNION_ADDRESS(&client->addr);
-		inet_ntop(af, ipdata, clientname, sizeof clientname);
+		if(!inet_ntop(af, ipdata, clientname, sizeof clientname))
+			strcpy(clientname, "");
 		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
 	}
 	return fd;
@@ -391,6 +392,7 @@ static int usage(void) {
 		"this is handy for programs like firefox that don't support\n"
 		"user/pass auth. for it to work you'd basically make one connection\n"
 		"with another program that supports it, and then you can use firefox too.\n"
+		"for unix socket server use -U path and do not use -1 -i -p.\n"
 	);
 	return 1;
 }
@@ -403,9 +405,10 @@ static void zero_arg(char *s) {
 
 int main(int argc, char** argv) {
 	int ch;
-	const char *listenip = "0.0.0.0";
-	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:")) != -1) {
+	const char *listenip = NULL;
+	int port = -1;
+	const char *unixpath = NULL;
+	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:U:")) != -1) {
 		switch(ch) {
 			case '1':
 				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
@@ -430,6 +433,9 @@ int main(int argc, char** argv) {
 			case 'p':
 				port = atoi(optarg);
 				break;
+			case 'U':
+				unixpath = optarg;
+				break;
 			case ':':
 				dprintf(2, "error: option -%c requires an operand\n", optopt);
 				/* fall through */
@@ -445,12 +451,33 @@ int main(int argc, char** argv) {
 		dprintf(2, "error: auth-once option must be used together with user/pass\n");
 		return 1;
 	}
+	if(unixpath) {
+		if(auth_ips) {
+			dprintf(2, "error: auth-once option cannot be used with unix sockets\n");
+			return 1;
+		}
+		if(listenip || port != -1) {
+			dprintf(2, "error: address/port and unix path cannot be used together\n");
+			return 1;
+		}
+	}
 	signal(SIGPIPE, SIG_IGN);
 	struct server s;
 	sblist *threads = sblist_new(sizeof (struct thread*), 8);
-	if(server_setup(&s, listenip, port)) {
-		perror("server_setup");
-		return 1;
+	if(unixpath) {
+		if(server_setup_unix(&s, unixpath)) {
+			perror("server_setup_unix");
+			return 1;
+		}
+	} else {
+		if(!listenip)
+			listenip = "0.0.0.0";
+		if(port == -1)
+			port = 1080;
+		if(server_setup(&s, listenip, port)) {
+			perror("server_setup");
+			return 1;
+		}
 	}
 	server = &s;
 

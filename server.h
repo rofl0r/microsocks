@@ -44,6 +44,7 @@ int bindtoip(int fd, union sockaddr_union *bindaddr);
 
 int server_waitclient(struct server *server, struct client* client);
 int server_setup(struct server *server, const char* listenip, unsigned short port);
+int server_setup_unix(struct server *server, const char* unixpath);
 
 #endif
 
