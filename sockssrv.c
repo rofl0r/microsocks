@@ -44,6 +44,7 @@
 
 #ifndef MAX
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
 #endif
 
 #ifdef PTHREAD_STACK_MIN
@@ -282,7 +283,10 @@ static void copyloop(int fd1, int fd2) {
 		}
 		int infd = (fds[0].revents & POLLIN) ? fd1 : fd2;
 		int outfd = infd == fd2 ? fd1 : fd2;
-		char buf[1024];
+		/* since the biggest stack consumer in the entire code is
+		   libc's getaddrinfo(), we can safely use at least half the
+		   available stacksize to improve throughput. */
+		char buf[MIN(16*1024, THREAD_STACK_SIZE/2)];
 		ssize_t sent = 0, n = read(infd, buf, sizeof buf);
 		if(n <= 0) return;
 		while(sent < n) {
@@ -310,14 +314,12 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 	return EC_NOT_ALLOWED;
 }
 
-static void* clientthread(void *data) {
-	struct thread *t = data;
-	t->state = SS_1_CONNECTED;
+static int handshake(struct thread *t) {
 	unsigned char buf[1024];
 	ssize_t n;
 	int ret;
-	int remotefd = -1;
 	enum authmethod am;
+	t->state = SS_1_CONNECTED;
 	while((n = recv(t->client.fd, buf, sizeof buf, 0)) > 0) {
 		switch(t->state) {
 			case SS_1_CONNECTED:
@@ -325,13 +327,13 @@ static void* clientthread(void *data) {
 				if(am == AM_NO_AUTH) t->state = SS_3_AUTHED;
 				else if (am == AM_USERNAME) t->state = SS_2_NEED_AUTH;
 				send_auth_response(t->client.fd, 5, am);
-				if(am == AM_INVALID) goto breakloop;
+				if(am == AM_INVALID) return -1;
 				break;
 			case SS_2_NEED_AUTH:
 				ret = check_credentials(buf, n);
 				send_auth_response(t->client.fd, 1, ret);
 				if(ret != EC_SUCCESS)
-					goto breakloop;
+					return -1;
 				t->state = SS_3_AUTHED;
 				if(auth_ips && !pthread_rwlock_wrlock(&auth_ips_lock)) {
 					if(!is_in_authed_list(&t->client.addr))
@@ -343,23 +345,24 @@ static void* clientthread(void *data) {
 				ret = connect_socks_target(buf, n, &t->client);
 				if(ret < 0) {
 					send_error(t->client.fd, ret*-1);
-					goto breakloop;
+					return -1;
 				}
-				remotefd = ret;
 				send_error(t->client.fd, EC_SUCCESS);
-				copyloop(t->client.fd, remotefd);
-				goto breakloop;
-
+				return ret;
 		}
 	}
-breakloop:
+	return -1;
+}
 
-	if(remotefd != -1)
+static void* clientthread(void *data) {
+	struct thread *t = data;
+	int remotefd = handshake(t);
+	if(remotefd != -1) {
+		copyloop(t->client.fd, remotefd);
 		close(remotefd);
-
+	}
 	close(t->client.fd);
 	t->done = 1;
-
 	return 0;
 }
 
