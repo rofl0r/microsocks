@@ -380,17 +380,21 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P password -b bindaddr\n"
+		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -w ips\n"
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -q disables logging.\n"
 		"option -b specifies which ip outgoing connections are bound to\n"
+		"option -w allows to specify a comma-separated whitelist of ip addresses,\n"
+		" that may use the proxy without user/pass authentication.\n"
+		" e.g. -w 127.0.0.1,192.168.1.1.1,::1 or just -w 10.0.0.1\n"
+		" to allow access ONLY to those ips, choose an impossible to guess user/pw combo.\n"
 		"option -1 activates auth_once mode: once a specific ip address\n"
-		"authed successfully with user/pass, it is added to a whitelist\n"
-		"and may use the proxy without auth.\n"
-		"this is handy for programs like firefox that don't support\n"
-		"user/pass auth. for it to work you'd basically make one connection\n"
-		"with another program that supports it, and then you can use firefox too.\n"
+		" authed successfully with user/pass, it is added to a whitelist\n"
+		" and may use the proxy without auth.\n"
+		" this is handy for programs like firefox that don't support\n"
+		" user/pass auth. for it to work you'd basically make one connection\n"
+		" with another program that supports it, and then you can use firefox too.\n"
 	);
 	return 1;
 }
@@ -404,11 +408,27 @@ static void zero_arg(char *s) {
 int main(int argc, char** argv) {
 	int ch;
 	const char *listenip = "0.0.0.0";
+	char *p, *q;
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:w:")) != -1) {
 		switch(ch) {
+			case 'w': /* fall-through */
 			case '1':
-				auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				if(!auth_ips)
+					auth_ips = sblist_new(sizeof(union sockaddr_union), 8);
+				if(ch == '1') break;
+				p = optarg;
+				while(1) {
+					union sockaddr_union ca;
+					if((q = strchr(p, ','))) *q = 0;
+					if(resolve_sa(p, 0, &ca)) {
+						dprintf(2, "error: failed to resolve %s\n", p);
+						return 1;
+					}
+					add_auth_ip(&ca);
+					if(q) *(q++) = ',', p = q;
+					else break;
+				}
 				break;
 			case 'q':
 				quiet = 1;
@@ -442,7 +462,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	if(auth_ips && !auth_pass) {
-		dprintf(2, "error: auth-once option must be used together with user/pass\n");
+		dprintf(2, "error: -1/-w options must be used together with user/pass\n");
 		return 1;
 	}
 	signal(SIGPIPE, SIG_IGN);

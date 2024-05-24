@@ -41,12 +41,18 @@ libc is not even 50 KB. that's easily usable even on the cheapest routers.
 command line options
 --------------------
 
-    microsocks -1 -q -i listenip -p port -u user -P password -b bindaddr
+    microsocks -1 -q -i listenip -p port -u user -P passw -b bindaddr -w wl
 
 all arguments are optional.
 by default listenip is 0.0.0.0 and port 1080.
 
-option -1 activates auth_once mode: once a specific ip address
+- option -q disables logging.
+- option -b specifies which ip outgoing connections are bound to
+- option -w allows to specify a comma-separated whitelist of ip addresses,
+that may use the proxy without user/pass authentication.
+e.g. -w 127.0.0.1,192.168.1.1.1,::1 or just -w 10.0.0.1
+to allow access ONLY to those ips, choose an impossible to guess user/pw combo.
+- option -1 activates auth_once mode: once a specific ip address
 authed successfully with user/pass, it is added to a whitelist
 and may use the proxy without auth.
 this is handy for programs like firefox that don't support
@@ -56,7 +62,6 @@ for example, authenticate once using curl:
 
     curl --socks5 user:password@listenip:port anyurl
 
-option -q disables logging.
 
 Supported SOCKS5 Features
 -------------------------
