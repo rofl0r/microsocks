@@ -35,6 +35,7 @@
 #include <limits.h>
 #include "server.h"
 #include "sblist.h"
+#include "bind2device.h"
 
 /* timeout in microseconds on resource exhaustion to prevent excessive
    cpu usage. */
@@ -68,6 +69,7 @@ static sblist* auth_ips;
 static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
 static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
+static const char* bind_device;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -159,6 +161,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
 	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
 	int fd = socket(raddr->ai_family, SOCK_STREAM, 0);
+	if(bind_device && bind2device(fd, raddr->ai_family, bind_device) == -1)
+		goto eval_errno;
 	if(fd == -1) {
 		eval_errno:
 		if(fd != -1) close(fd);
@@ -383,7 +387,7 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -w ips\n"
+		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -B bind2device -w ips\n"
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -q disables logging.\n"
@@ -413,7 +417,7 @@ int main(int argc, char** argv) {
 	const char *listenip = "0.0.0.0";
 	char *p, *q;
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:w:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:B:i:p:u:P:w:")) != -1) {
 		switch(ch) {
 			case 'w': /* fall-through */
 			case '1':
@@ -438,6 +442,10 @@ int main(int argc, char** argv) {
 				break;
 			case 'b':
 				resolve_sa(optarg, 0, &bind_addr);
+				break;
+			case 'B':
+				bind_device = strdup(optarg);
+				zero_arg(optarg);
 				break;
 			case 'u':
 				auth_user = strdup(optarg);
