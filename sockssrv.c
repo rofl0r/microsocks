@@ -59,6 +59,9 @@
 #elif defined(__GLIBC__) || defined(__FreeBSD__) || defined(__sun__)
 #undef THREAD_STACK_SIZE
 #define THREAD_STACK_SIZE 32*1024
+#elif defined(__OpenBSD__) && defined(__clang__)
+#undef THREAD_STACK_SIZE
+#define THREAD_STACK_SIZE 32*1024
 #endif
 
 static int quiet;
