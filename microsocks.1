@@ -1,0 +1,102 @@
+.Dd February 11, 2025
+.Dt MICROSOCKS 1
+.Os
+.Sh NAME
+.Nm microsocks
+.Nd tiny SOCKS5 server with very moderate resource usage
+.Sh SYNOPSIS
+.Bk -words
+.Bl -tag -width microsocks
+.It Nm
+.Op Fl 1q
+.Op Fl b Ar ip
+.Op Fl i Ar addr
+.Op Fl P Ar pass
+.Op Fl p Ar port
+.Op Fl u Ar user
+.Op Fl w Ar ips
+.Oc
+.El
+.Ek
+.Sh DESCRIPTION
+.Nm microsocks
+is a multithreaded, tiny, portable SOCKS5 server with very moderate resource
+usage that you can run on your remote boxes to tunnel connections through them,
+if for some reason SSH doesn't cut it for you.
+It is very lightweight, and very light on resources too: for every client, a
+thread with a low stack size is spawned. the main process basically doesn't
+consume any resources at all. It is also designed to be robust: it handles
+resource exhaustion gracefully by simply denying new connections, instead of
+calling
+.Xr abort 3
+as most other programs do these days.
+Another plus is ease-of-use: no config file necessary, everything can be done
+from the command line and doesn't even need any parameters for quick setup.
+.Sh OPTIONS
+The following options are supported by
+.Nm :
+.Bl -tag -width indent
+.It Fl 1
+Activates auth_once mode: once a specific IP address authorized successfully
+with user:password pair, it is added to a whitelist and may use the proxy
+without authorization. This is handy for programs like Firefox that don't
+support user:password authorization. For it to work you'd basically make one
+connection with another program that supports it, and then you can use Firefox
+too. This option requires options
+.Fl u
+and
+.Fl P
+also to be specified.
+.It Fl b Ar ip
+Specifies IP address outgoing connections are bound to.
+.It Fl i Ar addr
+Specifies local address to listen connections on. Host name or IP address can be
+supplied. Default to
+.Cm 0.0.0.0 .
+.It Fl P
+Specifies authorization password. This option requires
+.Fl u
+also to be specified.
+.It Fl p
+TCP port to listen to. Default to
+.Cm 1080 .
+.It Fl q
+Quiet mode: suppress logging messages.
+.It Fl u
+Specifies authorization username value. This option requires
+.Fl P
+also to be specified.
+.It Fl w
+A comma-separated whitelist of IP addresses, that may use the proxy without
+authentication. e.g.
+.Cm -w 127.0.0.1,192.168.1.1.1,::1
+or just
+.Cm -w 10.0.0.1 .
+To allow access ONLY to those IPs, choose an impossible to guess user:password
+combination.
+.El
+.Sh EXAMPLES
+Require authentication for all except two specified hosts.
+.Pp
+.Dl $ microsocks -w 192.168.1.100,192.168.1.101 -u user -P secret
+.Pp
+Listen on port 8080 and use 46.62.90.74 as a source IP for external connections.
+.Pp
+.Dl $ microsocks -i 0.0.0.0 -b 46.62.90.74 -p 8080
+.Pp
+Connect to
+.Lk https://freebsd.org
+using
+.Cm curl
+command through the running
+.Nm .
+.Pp
+.Dl $ curl --socks5 user:password@127.0.0.1:1080 https://freebsd.org
+.Sh AUTHORS
+Author of
+.Nm
+is
+.An rofl0r Aq Lk https://github.com/rofl0r/microsocks
+.Pp
+This man page is maintained by
+.An Viacheslav Chimishuk Aq Mt vchimishuk@yandex.ru
