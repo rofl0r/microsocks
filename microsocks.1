@@ -54,7 +54,7 @@ also to be specified.
 .It Fl b Ar ip
 Specifies IP address outgoing connections are bound to.
 .It Fl i Ar addr
-Specifies local address to listen connections on.
+Specifies local address to listen for connections on.
 Host name or IP address can be
 supplied.
 Default to
@@ -76,8 +76,8 @@ This option requires
 .Fl P
 also to be specified.
 .It Fl w
-A comma-separated whitelist of IP addresses, that may use the proxy without
-authentication. e.g.
+A comma-separated whitelist of IP addresses that may use the proxy without
+authentication, e.g.
 .Cm -w 127.0.0.1,192.168.1.1.1,::1
 or just
 .Cm -w 10.0.0.1 .
