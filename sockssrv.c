@@ -71,6 +71,7 @@ static sblist* auth_ips;
 static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
 static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
+static sblist *fwd_rules;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -97,6 +98,17 @@ enum errorcode {
 	EC_ADDRESSTYPE_NOT_SUPPORTED = 8,
 };
 
+struct fwd_rule {
+	char *match_name;
+	short match_port;
+	char *auth_buf; /* Username/Password request buffer (RFC-1929) */
+	size_t auth_len;
+	char *upstream_name;
+	short upstream_port;
+	char *req_buf; /* Client Connection Request buffer to send to upstream */
+	size_t req_len;
+};
+
 struct thread {
 	pthread_t pt;
 	struct client client;
@@ -116,6 +128,28 @@ struct thread {
 static void dolog(const char* fmt, ...) { }
 #endif
 
+static int upstream_handshake(const struct fwd_rule* rule, unsigned char *buf, size_t n, int fd) {
+	unsigned char sbuf[255];
+	if(rule->auth_buf) {
+		char b[] = {5,2,0,2};
+		write(fd, b, sizeof b);
+	} else { /* NO_AUTH */
+		char b[] = {5,1,0};
+		write(fd, b, sizeof b);
+	}
+	if(read(fd, sbuf, 2) < 2 || sbuf[0] != 5 || sbuf[1] == 0xff)
+		return close(fd), -1;
+	if(sbuf[1] == 2) {
+		write(fd, rule->auth_buf, rule->auth_len);
+		if(read(fd, sbuf, 2) < 2 || sbuf[0] != 1 || sbuf[1] != 0)
+			return close(fd), -1;
+	}
+	write(fd, rule->req_buf, rule->req_len);
+	if(read(fd, sbuf, 255) < 6 || sbuf[1] != 0)
+		return close(fd), -1;
+	return fd;
+}
+
 static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union* bindaddr) {
 	int af = SOCKADDR_UNION_AF(bindaddr);
 	if(af == AF_UNSPEC) return list;
@@ -131,9 +165,11 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	if(buf[1] != 1) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT method */
 	if(buf[2] != 0) return -EC_GENERAL_FAILURE; /* malformed packet */
 
+	size_t i;
 	int af = AF_INET;
 	size_t minlen = 4 + 4 + 2, l;
 	char namebuf[256];
+	struct fwd_rule *rule = NULL;
 	struct addrinfo* remote;
 
 	switch(buf[3]) {
@@ -158,6 +194,21 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	}
 	unsigned short port;
 	port = (buf[minlen-2] << 8) | buf[minlen-1];
+
+	if(fwd_rules) {
+		for(i=0;i<sblist_getsize(fwd_rules);++i) {
+			struct fwd_rule* r = (struct fwd_rule*)sblist_get(fwd_rules, i);
+			if(!strcmp(r->match_name, namebuf) && r->match_port == port) {
+				rule = r;
+				/* repurpose namebuf and port to refer to the upstream SOCKS proxy as
+				 * we now need to connect() to that */
+				strcpy(namebuf, r->upstream_name);
+				port = r->upstream_port;
+				break;
+			}
+		}
+	}
+
 	/* there's no suitable errorcode in rfc1928 for dns lookup failure */
 	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
 	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
@@ -200,7 +251,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		inet_ntop(af, ipdata, clientname, sizeof clientname);
 		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
 	}
-	return fd;
+
+	return rule ? upstream_handshake(rule, buf, n, fd) : fd;
 }
 
 static int is_authed(union sockaddr_union *client, union sockaddr_union *authedip) {
@@ -382,11 +434,71 @@ static void collect(sblist *threads) {
 	}
 }
 
+static short host_get_port(char *name) {
+	int p,n;
+	char *c;
+	if((c = strrchr(name, ':')) && sscanf(c+1,"%d%n",&p, &n)==1 && n==(char*)rawmemchr(name,'\0')-c-1 && p > 0 && p < USHRT_MAX)
+		return (*c='\0'),(short)p;
+	else
+		return 0;
+}
+
+static int fwd_rules_add(char *str) {
+	char *match = NULL, *upstream = NULL, *remote = NULL;
+	unsigned short match_port, upstream_port, remote_port;
+	int ncred;
+
+	if(sscanf(str, "%m[^,],%n%m[^,],%ms\n", &match, &ncred, &upstream, &remote) != 3)
+		return 1;
+
+	if(!(match_port=host_get_port(match)) || !(upstream_port=host_get_port(upstream)) || !(remote_port=host_get_port(remote)))
+		return 1;
+
+	struct fwd_rule *rule = (struct fwd_rule*)malloc(sizeof(struct fwd_rule));
+	rule->match_name = match;
+	rule->match_port = match_port;
+	rule->upstream_name = upstream;
+	rule->upstream_port = upstream_port;
+
+	char* p, *q;
+	if((p=strchr(upstream, '@')) && (q=memchr(upstream, ':', p - upstream))) {
+		*p++ = '\0';
+		*q++ = '\0';
+		char ulen = strlen(upstream), plen = strlen(q);
+		rule->auth_len = 1 + 1 + ulen + 1 + plen;
+		rule->auth_buf = malloc(rule->auth_len);
+		rule->auth_buf[0] = 1;
+		rule->auth_buf[1] = ulen;
+		memcpy(&rule->auth_buf[2], upstream, ulen);
+		rule->auth_buf[2 + ulen] = plen;
+		memcpy(&rule->auth_buf[3 + ulen], q, plen);
+		rule->upstream_name = strdup(p);
+		free(upstream);
+		/* hide from ps */
+		memset(str+ncred, '*', ulen+1+plen);
+	}
+
+	short rlen = strlen(remote);
+	rule->req_len = 3 + 1 + 1 + rlen + 2;
+	rule->req_buf = (char*)malloc(rule->req_len);
+	rule->req_buf[0] = 5;
+	rule->req_buf[1] = 1;
+	rule->req_buf[2] = 0;
+	rule->req_buf[3] = 3;
+	rule->req_buf[4] = rlen;
+	memcpy(&rule->req_buf[5], remote, rlen);
+	rule->req_buf[5 + rlen] = (remote_port >> 8);
+	rule->req_buf[5 + rlen + 1] = (remote_port & 0xFF);
+	sblist_add(fwd_rules, rule);
+
+	return 0;
+}
+
 static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -w ips\n"
+		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -w ips -f fwdrule\n"
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -q disables logging.\n"
@@ -401,6 +513,11 @@ static int usage(void) {
 		" this is handy for programs like firefox that don't support\n"
 		" user/pass auth. for it to work you'd basically make one connection\n"
 		" with another program that supports it, and then you can use firefox too.\n"
+		"option -f specifies a forwarding rule of the form\n"
+		"  match_name:match_port,[user:password@]upstream_name:upstream_port,remote_name:remote_port\n"
+		" this will cause requests that /match/ to be renamed to /remote/\n"
+		" and sent to the /upstream/ SOCKS5 proxy server.\n"
+		" this option may be specified multiple times.\n"
 	);
 	return 1;
 }
@@ -416,7 +533,7 @@ int main(int argc, char** argv) {
 	const char *listenip = "0.0.0.0";
 	char *p, *q;
 	unsigned port = 1080;
-	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:w:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:i:p:u:P:w:f:")) != -1) {
 		switch(ch) {
 			case 'w': /* fall-through */
 			case '1':
@@ -455,6 +572,12 @@ int main(int argc, char** argv) {
 				break;
 			case 'p':
 				port = atoi(optarg);
+				break;
+			case 'f':
+				if(!fwd_rules)
+					fwd_rules = sblist_new(sizeof(struct fwd_rule), 16);
+				if(fwd_rules_add(optarg))
+					return dprintf(2, "error: could not parse forwarding rule %s\n", optarg), 1;
 				break;
 			case ':':
 				dprintf(2, "error: option -%c requires an operand\n", optopt);
