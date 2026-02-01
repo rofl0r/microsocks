@@ -37,6 +37,7 @@
 #include <limits.h>
 #include "server.h"
 #include "sblist.h"
+#include "bind2device.h"
 
 /* timeout in microseconds on resource exhaustion to prevent excessive
    cpu usage. */
@@ -77,7 +78,7 @@ static sblist* auth_ips;
 static pthread_rwlock_t auth_ips_lock = PTHREAD_RWLOCK_INITIALIZER;
 static const struct server* server;
 static union sockaddr_union bind_addr = {.v4.sin_family = AF_UNSPEC};
-static const char* bind_interface;
+static const char* bind_device;
 
 enum socksstate {
 	SS_1_CONNECTED,
@@ -174,6 +175,8 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	if(resolve(namebuf, port, &remote)) return -EC_GENERAL_FAILURE;
 	struct addrinfo* raddr = addr_choose(remote, &bind_addr);
 	int fd = socket(raddr->ai_family, SOCK_STREAM, 0);
+	if(bind_device && bind2device(fd, raddr->ai_family, bind_device) == -1)
+		goto eval_errno;
 	if(fd == -1) {
 		eval_errno:
 		if(fd != -1) close(fd);
@@ -198,8 +201,6 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
-	if(bind_interface && setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, bind_interface, strlen(bind_interface)) == -1)
-		goto eval_errno;
 	if(SOCKADDR_UNION_AF(&bind_addr) == raddr->ai_family &&
 	   bindtoip(fd, &bind_addr) == -1)
 		goto eval_errno;
@@ -405,7 +406,7 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -B bindiface -w ips -t timeout\n"
+		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -B bind2device -w ips -t timeout\n"
 #if defined(SOMARK)
 		"                  -m mark\n"
 #endif
@@ -474,7 +475,7 @@ int main(int argc, char** argv) {
 				resolve_sa(optarg, 0, &bind_addr);
 				break;
 			case 'B':
-				bind_interface = strdup(optarg);
+				bind_device = strdup(optarg);
 				zero_arg(optarg);
 				break;
 			case 'u':
