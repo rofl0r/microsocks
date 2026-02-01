@@ -28,6 +28,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdarg.h>
 #include <pthread.h>
 #include <signal.h>
 #include <poll.h>
@@ -119,12 +120,21 @@ struct thread {
 /* we log to stderr because it's not using line buffering, i.e. malloc which would need
    locking when called from different threads. for the same reason we use dprintf,
    which writes directly to an fd. */
-#define LOGTS() { \
-	char t[20] = {}; struct tm tm_buf; time_t secs = time(NULL); \
-	strftime(t, sizeof(t), "[%m-%d %T] ", localtime_r(&secs, &tm_buf)); \
-	fputs(t, stderr); \
+static inline void dolog(const char *fmt, ...) {
+    if(quiet) return;
+    char t[32] = {};
+    struct tm tm_buf;
+    time_t secs = time(NULL);
+
+    va_list args;
+    va_start(args, fmt);
+
+    strftime(t, sizeof(t), "[%Y-%m-%d %T] ", localtime_r(&secs, &tm_buf));
+    dprintf(fileno(stderr), "%s", t);
+    vdprintf(fileno(stderr), fmt, args);
+
+    va_end(args);
 }
-#define dolog(...) do { if(quiet) break; LOGTS(); dprintf(2, __VA_ARGS__); } while(0)
 #else
 static void dolog(const char* fmt, ...) { }
 #endif
@@ -523,6 +533,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	server = &s;
+	dolog("Listening on %s:%d\n", listenip, port);
 
 	if (idle_timeout && fcntl(s.fd, F_SETFL, fcntl(s.fd, F_GETFL, 0) | O_NONBLOCK)) {
 		perror("fcntl O_NONBLOCK");
