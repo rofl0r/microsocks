@@ -30,6 +30,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <poll.h>
+#include <fcntl.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
@@ -398,13 +399,14 @@ static int usage(void) {
 	dprintf(2,
 		"MicroSocks SOCKS5 Server\n"
 		"------------------------\n"
-		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -B bindiface -w ips\n"
+		"usage: microsocks -1 -q -i listenip -p port -u user -P pass -b bindaddr -B bindiface -w ips -t timeout\n"
 #if defined(SOMARK)
 		"                  -m mark\n"
 #endif
 		"all arguments are optional.\n"
 		"by default listenip is 0.0.0.0 and port 1080.\n\n"
 		"option -q disables logging.\n"
+		"option -t specifies an idle exit timeout in seconds. default is to wait forever\n"
 		"option -b specifies which ip outgoing connections are bound to\n"
 		"option -w allows to specify a comma-separated whitelist of ip addresses,\n"
 		" that may use the proxy without user/pass authentication.\n"
@@ -434,10 +436,11 @@ int main(int argc, char** argv) {
 	const char *listenip = "0.0.0.0";
 	char *p, *q;
 	unsigned port = 1080;
+	unsigned idle_timeout = 0;
 #if defined(SOMARK)
-	while((ch = getopt(argc, argv, ":1qb:B:i:m:p:u:P:w:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:B:i:m:p:t:u:P:w:")) != -1) {
 #else
-	while((ch = getopt(argc, argv, ":1qb:B:i:p:u:P:w:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:B:i:p:t:u:P:w:")) != -1) {
 #endif
 		switch(ch) {
 			case 'w': /* fall-through */
@@ -482,6 +485,9 @@ int main(int argc, char** argv) {
 			case 'p':
 				port = atoi(optarg);
 				break;
+			case 't':
+				idle_timeout = atoi(optarg);
+				break;
 #if defined(SOMARK)
 			case 'm':
 				somark = atoi(optarg);
@@ -511,8 +517,34 @@ int main(int argc, char** argv) {
 	}
 	server = &s;
 
+	if (idle_timeout && fcntl(s.fd, F_SETFL, fcntl(s.fd, F_GETFL, 0) | O_NONBLOCK)) {
+		perror("fcntl O_NONBLOCK");
+		return 1;
+	}
+
 	while(1) {
-		collect(threads);
+		while(1) {
+			collect(threads);
+			if (!idle_timeout) break;
+			struct pollfd fds[1] = {
+				[0] = {.fd = s.fd, .events = POLLIN},
+			};
+			switch(poll(fds, 1, idle_timeout*1000)) {
+				case 0:
+					if (sblist_getsize(threads) == 0) {
+						dprintf(2, "idle timeout exit\n");
+						return 0;
+					}
+					continue;
+				case -1:
+					if(errno != EINTR && errno != EAGAIN) {
+						perror("poll");
+						return 1;
+					}
+					continue;
+			}
+			break;
+		}
 		struct client c;
 		struct thread *curr = malloc(sizeof (struct thread));
 		if(!curr) goto oom;
@@ -521,6 +553,12 @@ int main(int argc, char** argv) {
 			dolog("failed to accept connection\n");
 			free(curr);
 			usleep(FAILURE_TIMEOUT);
+			continue;
+		}
+		if (idle_timeout && fcntl(c.fd, F_SETFL, fcntl(c.fd, F_GETFL, 0) & ~O_NONBLOCK)) {
+			perror("fcntl ~O_NONBLOCK");
+			close(c.fd);
+			free(curr);
 			continue;
 		}
 		curr->client = c;
