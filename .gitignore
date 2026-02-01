@@ -1,4 +1,5 @@
 *.o
 *.out
 out
+microsocks
 
