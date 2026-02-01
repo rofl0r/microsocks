@@ -36,9 +36,11 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
+#include <sys/time.h>
 #include "server.h"
 #include "sblist.h"
 #include "bind2device.h"
+#define MICROSOCKS_VERSION "1.0.5-forward"
 
 /* timeout in microseconds on resource exhaustion to prevent excessive
    cpu usage. */
@@ -151,26 +153,107 @@ static inline void dolog(const char *fmt, ...) {
 static void dolog(const char* fmt, ...) { }
 #endif
 
-static int upstream_handshake(const struct fwd_rule* rule, unsigned char *buf, size_t n, int fd) {
-	unsigned char sbuf[255];
+static int upstream_handshake(const struct fwd_rule* rule, unsigned char *client_buf, size_t client_buf_len,
+				int client_fd, int upstream_fd, unsigned short client_port) {
+	unsigned char sbuf[512];
+	ssize_t r;
+
 	if(rule->auth_buf) {
-		char b[] = {5,2,0,2};
-		write(fd, b, sizeof b);
-	} else { /* NO_AUTH */
-		char b[] = {5,1,0};
-		write(fd, b, sizeof b);
+		unsigned char handshake[4] = {5, 2, 0, 2};
+		if (write(upstream_fd, handshake, 4) != 4) {
+			close(upstream_fd);
+			return -1;
+		}
+	} else {
+		unsigned char handshake[3] = {5, 1, 0};
+		if (write(upstream_fd, handshake, 3) != 3) {
+			close(upstream_fd);
+			return -1;
+		}
 	}
-	if(read(fd, sbuf, 2) < 2 || sbuf[0] != 5 || sbuf[1] == 0xff)
-		return close(fd), -1;
-	if(sbuf[1] == 2) {
-		write(fd, rule->auth_buf, rule->auth_len);
-		if(read(fd, sbuf, 2) < 2 || sbuf[0] != 1 || sbuf[1] != 0)
-			return close(fd), -1;
+
+	if (read(upstream_fd, sbuf, 2) != 2 || sbuf[0] != 5) {
+		close(upstream_fd);
+		return -1;
 	}
-	write(fd, rule->req_buf, rule->req_len);
-	if(read(fd, sbuf, 255) < 6 || sbuf[1] != 0)
-		return close(fd), -1;
-	return fd;
+
+	if (sbuf[1] == 2) {
+		if (!rule->auth_buf) {
+			close(upstream_fd);
+			return -1;
+		}
+		if (write(upstream_fd, rule->auth_buf, rule->auth_len) != (ssize_t)rule->auth_len) {
+			close(upstream_fd);
+			return -1;
+		}
+		if (read(upstream_fd, sbuf, 2) != 2 || sbuf[0] != 1 || sbuf[1] != 0) {
+			close(upstream_fd);
+			return -1;
+		}
+	} else if (sbuf[1] != 0) {
+		close(upstream_fd);
+		return -1;
+	}
+
+	if (write(upstream_fd, client_buf, client_buf_len) != (ssize_t)client_buf_len) {
+		close(upstream_fd);
+		return -1;
+	}
+
+	size_t total = 0;
+	size_t need = 4;
+
+	while (total < need) {
+		r = read(upstream_fd, sbuf + total, need - total);
+		if (r <= 0) {
+			close(upstream_fd);
+			return -1;
+		}
+		total += r;
+	}
+
+	if (sbuf[1] != 0) {
+		close(upstream_fd);
+		return -sbuf[1];
+	}
+
+	size_t need_more = 0;
+	switch (sbuf[3]) {
+		case 1:
+			need_more = 4 + 2;
+			break;
+		case 4:
+			need_more = 16 + 2;
+			break;
+		case 3:
+			r = read(upstream_fd, sbuf + total, 1);
+			if (r != 1) {
+				close(upstream_fd);
+				return -1;
+			}
+			total += r;
+			need_more = sbuf[4] + 2;
+			break;
+		default:
+			close(upstream_fd);
+			return -EC_ADDRESSTYPE_NOT_SUPPORTED;
+	}
+
+	while (total < need + need_more) {
+		r = read(upstream_fd, sbuf + total, (need + need_more) - total);
+		if (r <= 0) {
+			close(upstream_fd);
+			return -1;
+		}
+		total += r;
+	}
+
+	if (write(client_fd, sbuf, total) != (ssize_t)total) {
+		close(upstream_fd);
+		return -1;
+	}
+
+	return upstream_fd;
 }
 
 static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union* bindaddr) {
@@ -182,7 +265,9 @@ static struct addrinfo* addr_choose(struct addrinfo* list, union sockaddr_union*
 	return list;
 }
 
-static int connect_socks_target(unsigned char *buf, size_t n, struct client *client) {
+static int connect_socks_target(unsigned char *buf, size_t n, struct client *client, int *used_rule) {
+	*used_rule = 0;
+
 	if(n < 5) return -EC_GENERAL_FAILURE;
 	if(buf[0] != 5) return -EC_GENERAL_FAILURE;
 	if(buf[1] != 1) return -EC_COMMAND_NOT_SUPPORTED; /* we support only CONNECT method */
@@ -218,14 +303,20 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 	unsigned short port;
 	port = (buf[minlen-2] << 8) | buf[minlen-1];
 
+	char original_name[256];
+	unsigned short original_port = port;
+	strncpy(original_name, namebuf, sizeof(original_name) - 1);
+	original_name[sizeof(original_name) - 1] = '\0';
 	if(fwd_rules) {
 		for(i=0;i<sblist_getsize(fwd_rules);++i) {
 			struct fwd_rule* r = (struct fwd_rule*)sblist_get(fwd_rules, i);
-			if(!strcmp(r->match_name, namebuf) && r->match_port == port) {
+			int name_match = (r->match_name[0]=='\0' || strcmp(r->match_name, namebuf) == 0);
+			int port_match = (r->match_port == 0 || r->match_port == port);
+			if(name_match && port_match) {
 				rule = r;
-				/* repurpose namebuf and port to refer to the upstream SOCKS proxy as
-				 * we now need to connect() to that */
-				strcpy(namebuf, r->upstream_name);
+				*used_rule = 1;
+				strncpy(namebuf, r->upstream_name, sizeof(namebuf)-1);
+				namebuf[sizeof(namebuf)-1] = '\0';
 				port = r->upstream_port;
 				break;
 			}
@@ -262,6 +353,10 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 			return -EC_GENERAL_FAILURE;
 		}
 	}
+	struct timeval tv = {5, 0};
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
+
 	if(SOCKADDR_UNION_AF(&bind_addr) == raddr->ai_family &&
 	   bindtoip(fd, &bind_addr) == -1)
 		goto eval_errno;
@@ -279,10 +374,22 @@ static int connect_socks_target(unsigned char *buf, size_t n, struct client *cli
 		af = SOCKADDR_UNION_AF(&client->addr);
 		void *ipdata = SOCKADDR_UNION_ADDRESS(&client->addr);
 		inet_ntop(af, ipdata, clientname, sizeof clientname);
-		dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
+		if (rule) {
+			dolog("client[%d] %s: %s:%d -> via %s:%d\n", client->fd, clientname, original_name, original_port, rule->upstream_name, rule->upstream_port);
+		} else {
+			dolog("client[%d] %s: connected to %s:%d\n", client->fd, clientname, namebuf, port);
+		}
 	}
 
-	return rule ? upstream_handshake(rule, buf, n, fd) : fd;
+	if (rule) {
+		int result = upstream_handshake(rule, buf, n, client->fd, fd, original_port);
+		if (result < 0) {
+			close(fd);
+			return result;
+		}
+		return result;
+	}
+	return fd;
 }
 
 static int is_authed(union sockaddr_union *client, union sockaddr_union *authedip) {
@@ -404,6 +511,7 @@ static int handshake(struct thread *t) {
 	ssize_t n;
 	int ret;
 	enum authmethod am;
+	int used_rule = 0;
 	t->state = SS_1_CONNECTED;
 	while((n = recv(t->client.fd, buf, sizeof buf, 0)) > 0) {
 		switch(t->state) {
@@ -427,12 +535,14 @@ static int handshake(struct thread *t) {
 				}
 				break;
 			case SS_3_AUTHED:
-				ret = connect_socks_target(buf, n, &t->client);
+				ret = connect_socks_target(buf, n, &t->client, &used_rule);
 				if(ret < 0) {
 					send_error(t->client.fd, ret*-1);
 					return -1;
 				}
-				send_error(t->client.fd, EC_SUCCESS);
+				if (!used_rule) {
+					send_error(t->client.fd, EC_SUCCESS);
+				}
 				return ret;
 		}
 	}
@@ -467,10 +577,10 @@ static void collect(sblist *threads) {
 static short host_get_port(char *name) {
 	int p,n;
 	char *c;
-	if((c = strrchr(name, ':')) && sscanf(c+1,"%d%n",&p, &n)==1 && n==(char*)rawmemchr(name,'\0')-c-1 && p > 0 && p < USHRT_MAX)
+	if((c = strrchr(name, ':')) && sscanf(c+1,"%d%n",&p, &n)==1 && n == (int)(strlen(c + 1)) && p >= 0 && p < USHRT_MAX)
 		return (*c='\0'),(short)p;
 	else
-		return 0;
+		return -1;
 }
 
 static int fwd_rules_add(char *str) {
@@ -481,36 +591,89 @@ static int fwd_rules_add(char *str) {
 	if(sscanf(str, "%m[^,],%n%m[^,],%ms\n", &match, &ncred, &upstream, &remote) != 3)
 		return 1;
 
-	if(!(match_port=host_get_port(match)) || !(upstream_port=host_get_port(upstream)) || !(remote_port=host_get_port(remote)))
+	match_port = host_get_port(match);
+	upstream_port = host_get_port(upstream);
+	remote_port = host_get_port(remote);
+
+	if(match_port < 0 || upstream_port <= 0 || remote_port < 0) {
+		free(match);
+		free(upstream);
+		free(remote);
 		return 1;
+	}
+
+	char *match_copy = strdup(match);
+	char *upstream_copy = strdup(upstream);
+	char *remote_copy = strdup(remote);
 
 	struct fwd_rule *rule = (struct fwd_rule*)malloc(sizeof(struct fwd_rule));
-	rule->match_name = match;
+	if (!rule) {
+		free(match_copy);
+		free(upstream_copy);
+		free(remote_copy);
+		free(match);
+		free(upstream);
+		free(remote);
+		return 1;
+	}
+
+	if(strcmp(match_copy, "0.0.0.0") == 0 || strcmp(match_copy, "*") == 0) {
+		free(match_copy);
+		rule->match_name = strdup("");
+	} else {
+		rule->match_name = match_copy;
+	}
 	rule->match_port = match_port;
-	rule->upstream_name = upstream;
-	rule->upstream_port = upstream_port;
 	rule->auth_buf = NULL;
 	rule->auth_len = 0;
 
-	char* p, *q;
-	if((p=strchr(upstream, '@')) && (q=memchr(upstream, ':', p - upstream))) {
-		*p++ = '\0';
-		*q++ = '\0';
-		char ulen = strlen(upstream), plen = strlen(q);
+	char *at_sign = strchr(upstream_copy, '@');
+	if (at_sign) {
+		*at_sign = '\0';
+		char *auth_part = upstream_copy;
+		char *host_part = at_sign + 1;
+		char *colon = strchr(auth_part, ':');
+		if (!colon) {
+			free(rule);
+			free(upstream_copy);
+			free(remote_copy);
+			free(match);
+			free(upstream);
+			free(remote);
+			return 1;
+		}
+		*colon++ = '\0';
+		char *username = auth_part;
+		char *password = colon;
+		size_t ulen = strlen(username);
+		size_t plen = strlen(password);
+		if (ulen > 255 || plen > 255) {
+			free(rule);
+			free(upstream_copy);
+			free(remote_copy);
+			free(match);
+			free(upstream);
+			free(remote);
+			return 1;
+		}
 		rule->auth_len = 1 + 1 + ulen + 1 + plen;
 		rule->auth_buf = malloc(rule->auth_len);
 		rule->auth_buf[0] = 1;
 		rule->auth_buf[1] = ulen;
-		memcpy(&rule->auth_buf[2], upstream, ulen);
+		memcpy(&rule->auth_buf[2], username, ulen);
 		rule->auth_buf[2 + ulen] = plen;
-		memcpy(&rule->auth_buf[3 + ulen], q, plen);
-		rule->upstream_name = strdup(p);
-		free(upstream);
+		memcpy(&rule->auth_buf[3 + ulen], password, plen);
+		rule->upstream_name = strdup(host_part);
+		rule->upstream_port = upstream_port;
 		/* hide from ps */
 		memset(str+ncred, '*', ulen+1+plen);
+	} else {
+		rule->upstream_name = strdup(upstream_copy);
+		rule->upstream_port = upstream_port;
 	}
 
-	short rlen = strlen(remote);
+	free(upstream_copy);
+	short rlen = strlen(remote_copy);
 	rule->req_len = 3 + 1 + 1 + rlen + 2;
 	rule->req_buf = (char*)malloc(rule->req_len);
 	rule->req_buf[0] = 5;
@@ -518,10 +681,15 @@ static int fwd_rules_add(char *str) {
 	rule->req_buf[2] = 0;
 	rule->req_buf[3] = 3;
 	rule->req_buf[4] = rlen;
-	memcpy(&rule->req_buf[5], remote, rlen);
-	rule->req_buf[5 + rlen] = (remote_port >> 8);
-	rule->req_buf[5 + rlen + 1] = (remote_port & 0xFF);
+	memcpy(&rule->req_buf[5], remote_copy, rlen);
+	unsigned short rport = remote_port ? remote_port : 0;
+	rule->req_buf[5 + rlen]     = (rport >> 8) & 0xFF;
+	rule->req_buf[5 + rlen + 1] = (rport & 0xFF);
+	free(remote_copy);
 	sblist_add(fwd_rules, rule);
+	free(match);
+	free(upstream);
+	free(remote);
 
 	return 0;
 }
@@ -557,6 +725,7 @@ static int usage(void) {
 		" this will cause requests that /match/ to be renamed to /remote/\n"
 		" and sent to the /upstream/ SOCKS5 proxy server.\n"
 		" this option may be specified multiple times.\n"
+		"option -V prints version information and exits.\n"
 	);
 	return 1;
 }
@@ -574,9 +743,9 @@ int main(int argc, char** argv) {
 	unsigned port = 1080;
 	unsigned idle_timeout = 0;
 #if defined(SOMARK)
-	while((ch = getopt(argc, argv, ":1qb:B:i:m:p:t:u:P:w:f:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:B:i:m:p:t:u:P:w:f:V")) != -1) {
 #else
-	while((ch = getopt(argc, argv, ":1qb:B:i:p:t:u:P:w:f:")) != -1) {
+	while((ch = getopt(argc, argv, ":1qb:B:i:p:t:u:P:w:f:V")) != -1) {
 #endif
 		switch(ch) {
 			case 'w': /* fall-through */
@@ -640,6 +809,9 @@ int main(int argc, char** argv) {
 				/* fall through */
 			case '?':
 				return usage();
+			case 'V':
+				dprintf(1, "MicroSocks %s\n", MICROSOCKS_VERSION);
+				return 0;
 		}
 	}
 	if((auth_user && !auth_pass) || (!auth_user && auth_pass)) {
