@@ -4,9 +4,21 @@
 #undef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include <sys/socket.h>
-#include <netdb.h>
-#include <netinet/in.h>
+#ifdef _WIN32
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+
+	// Add definition for pollfd to account for Windows not defining
+	struct pollfd {
+		SOCKET fd; // socket instead of int
+		short  events; // same values as POSIX (POLLIN, POLLOUT, etc.)
+		short  revents;
+	};
+#else
+	#include <sys/socket.h>
+	#include <netdb.h>
+	#include <netinet/in.h>
+#endif
 
 #pragma RcB2 DEP "server.c"
 

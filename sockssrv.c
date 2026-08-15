@@ -22,6 +22,10 @@
 */
 
 #define _GNU_SOURCE
+#ifdef _WIN32
+	#include <winsock2.h>
+	// ^^ Ugly hack to force it to compile
+#endif
 #include <unistd.h>
 #define _POSIX_C_SOURCE 200809L
 #include <stdlib.h>
@@ -29,8 +33,13 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <signal.h>
-#include <poll.h>
-#include <arpa/inet.h>
+#ifdef _WIN32
+	#include "wsa2unix.h"
+	#include "dprintf.c"
+#else
+	#include <arpa/inet.h>
+	#include <poll.h>
+#endif
 #include <errno.h>
 #include <limits.h>
 #include "server.h"
@@ -276,7 +285,11 @@ static void copyloop(int fd1, int fd2) {
 		/* inactive connections are reaped after 15 min to free resources.
 		   usually programs send keep-alive packets so this should only happen
 		   when a connection is really unused. */
-		switch(poll(fds, 2, 60*15*1000)) {
+		#ifdef _WIN32
+			switch(WSAPoll(fds, 2, 60*15*1000)) {
+		#else
+			switch(poll(fds, 2, 60*15*1000)) {
+		#endif
 			case 0:
 				return;
 			case -1:
@@ -471,7 +484,11 @@ int main(int argc, char** argv) {
 		dprintf(2, "error: -1/-w options must be used together with user/pass\n");
 		return 1;
 	}
-	signal(SIGPIPE, SIG_IGN);
+	#ifdef _WIN32
+		// This is not needed because Windows doesn't kill processes on pipe failure
+	#else
+		signal(SIGPIPE, SIG_IGN);
+	#endif
 	struct server s;
 	sblist *threads = sblist_new(sizeof (struct thread*), 8);
 	if(server_setup(&s, listenip, port)) {
