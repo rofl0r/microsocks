@@ -317,13 +317,66 @@ static enum errorcode check_credentials(unsigned char* buf, size_t n) {
 	return EC_NOT_ALLOWED;
 }
 
+static int recv_full(int fd, unsigned char *buf, size_t len) {
+	size_t received = 0;
+	while(received < len) {
+		ssize_t n = recv(fd, buf+received, len-received, 0);
+		if(n < 0 && errno == EINTR) continue;
+		if(n <= 0) return 0;
+		received += n;
+	}
+	return 1;
+}
+
+static ssize_t recv_socks_request(int fd, enum socksstate state, unsigned char *buf) {
+	size_t have, len;
+	switch(state) {
+		case SS_1_CONNECTED:
+			have = 2;
+			if(!recv_full(fd, buf, have)) return -1;
+			len = have + buf[1];
+			break;
+		case SS_2_NEED_AUTH:
+			have = 2;
+			if(!recv_full(fd, buf, have)) return -1;
+			len = have + buf[1] + 1;
+			if(!recv_full(fd, buf+have, len-have)) return -1;
+			have = len;
+			len = have + buf[have-1];
+			break;
+		case SS_3_AUTHED:
+			have = 4;
+			if(!recv_full(fd, buf, have)) return -1;
+			switch(buf[3]) {
+				case 1: /* ipv4 */
+					len = 4 + 4 + 2;
+					break;
+				case 4: /* ipv6 */
+					len = 4 + 16 + 2;
+					break;
+				case 3: /* dns name */
+					if(!recv_full(fd, buf+have, 1)) return -1;
+					have++;
+					len = have + buf[have-1] + 2;
+					break;
+				default:
+					return have;
+			}
+			break;
+		default:
+			return -1;
+	}
+	if(!recv_full(fd, buf+have, len-have)) return -1;
+	return len;
+}
+
 static int handshake(struct thread *t) {
 	unsigned char buf[1024];
 	ssize_t n;
 	int ret;
 	enum authmethod am;
 	t->state = SS_1_CONNECTED;
-	while((n = recv(t->client.fd, buf, sizeof buf, 0)) > 0) {
+	while((n = recv_socks_request(t->client.fd, t->state, buf)) > 0) {
 		switch(t->state) {
 			case SS_1_CONNECTED:
 				am = check_auth_method(buf, n, &t->client);
