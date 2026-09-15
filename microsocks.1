@@ -62,6 +62,12 @@ TCP port to listen to. Default to
 .Cm 1080 .
 .It Fl q
 Quiet mode: suppress logging messages.
+.It Fl t Ar timeout
+Close idle connections after
+.Ar timeout
+seconds of inactivity.
+A value of 0 disables the idle timeout.
+Default is 0.
 .It Fl u
 Specifies authorization username value. This option requires
 .Fl P
@@ -99,4 +105,4 @@ is
 .An rofl0r Aq Lk https://github.com/rofl0r/microsocks
 .Pp
 This man page is maintained by
-.An Viacheslav Chimishuk Aq Mt vchimishuk@yandex.ru
+.An Viacheslav Chimishuk Aq Mt mail@vchimishuk.org
