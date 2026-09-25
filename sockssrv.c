@@ -111,7 +111,12 @@ struct thread {
 /* we log to stderr because it's not using line buffering, i.e. malloc which would need
    locking when called from different threads. for the same reason we use dprintf,
    which writes directly to an fd. */
-#define dolog(...) do { if(!quiet) dprintf(2, __VA_ARGS__); } while(0)
+#define LOGTS() { \
+	char t[20] = {}; struct tm tm_buf; time_t secs = time(NULL); \
+	strftime(t, sizeof(t), "[%m-%d %T] ", localtime_r(&secs, &tm_buf)); \
+	fputs(t, stderr); \
+}
+#define dolog(...) do { if(quiet) break; LOGTS(); dprintf(2, __VA_ARGS__); } while(0)
 #else
 static void dolog(const char* fmt, ...) { }
 #endif
