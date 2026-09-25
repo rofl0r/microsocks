@@ -35,6 +35,8 @@
 #include <limits.h>
 #include "server.h"
 #include "sblist.h"
+#include <time.h>
+#include <stdarg.h>
 
 /* timeout in microseconds on resource exhaustion to prevent excessive
    cpu usage. */
@@ -111,7 +113,27 @@ struct thread {
 /* we log to stderr because it's not using line buffering, i.e. malloc which would need
    locking when called from different threads. for the same reason we use dprintf,
    which writes directly to an fd. */
-#define dolog(...) do { if(!quiet) dprintf(2, __VA_ARGS__); } while(0)
+static void dolog(const char *fmt, ...) {
+    char t[32];
+    struct tm *tm_buf;
+    time_t secs = time(NULL);
+
+    if (quiet)
+        return;
+
+    va_list args;
+    va_start(args, fmt);
+
+    tm_buf = localtime(&secs);
+    if (tm_buf)
+        strftime(t, sizeof(t), "[%Y-%m-%d %T] ", tm_buf);
+    else
+        t[0] = '\0';
+    dprintf(fileno(stderr), "%s", t);
+    vdprintf(fileno(stderr), fmt, args);
+
+    va_end(args);
+}
 #else
 static void dolog(const char* fmt, ...) { }
 #endif
@@ -481,6 +503,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	server = &s;
+	dolog("Listening on %s:%d\n", listenip, port);
 
 	while(1) {
 		collect(threads);
