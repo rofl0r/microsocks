@@ -85,6 +85,14 @@ Supported SOCKS5 Features
 - IPv4, IPv6, DNS
 - TCP (no UDP at this time)
 
+Docker container
+----------------
+You can run microsocks in a docker container:
+
+    docker run --init -d -p 7777:1080 ghcr.io/rofl0r/microsocks
+
+Replace 7777 with the port microsocks will be accessible on.
+
 Troubleshooting
 ---------------
 
