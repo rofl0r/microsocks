@@ -410,6 +410,23 @@ static void zero_arg(char *s) {
 	for(i=0;i<l;i++) s[i] = 0;
 }
 
+/* Read RFC 1929 credentials privately, before any listening socket exists. */
+static int read_auth_file(const char *path, char value[258]) {
+	FILE *file = fopen(path, "rb");
+	if(!file) return -1;
+	size_t n = fread(value, 1, 258, file);
+	int failed = ferror(file);
+	fclose(file);
+	if(failed || n > 257 || memchr(value, 0, n)) return -1;
+	if(n && value[n-1] == '\n') {
+		n--;
+		if(n && value[n-1] == '\r') n--;
+	}
+	if(!n || n > 255 || memchr(value, '\n', n) || memchr(value, '\r', n)) return -1;
+	value[n] = 0;
+	return 0;
+}
+
 int main(int argc, char** argv) {
 	int ch;
 	const char *listenip = "0.0.0.0";
@@ -464,6 +481,18 @@ int main(int argc, char** argv) {
 			case '?':
 				return usage();
 		}
+	}
+	const char *user_file = getenv("MICROSOCKS_USERNAME_FILE");
+	const char *pass_file = getenv("MICROSOCKS_PASSWORD_FILE");
+	static char file_user[258], file_pass[258];
+	if(user_file || pass_file) {
+		if(!user_file || !pass_file || auth_user || auth_pass ||
+		   read_auth_file(user_file, file_user) || read_auth_file(pass_file, file_pass)) {
+			dprintf(2, "error: invalid credential file configuration\n");
+			return 1;
+		}
+		auth_user = file_user;
+		auth_pass = file_pass;
 	}
 	if((auth_user && !auth_pass) || (!auth_user && auth_pass)) {
 		dprintf(2, "error: user and pass must be used together\n");

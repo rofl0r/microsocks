@@ -74,6 +74,20 @@ by default listenip is 0.0.0.0 and port 1080.
    with another program that supports it, and then you can use firefox too.
 ```
 
+File credentials
+----------------
+
+Set both `MICROSOCKS_USERNAME_FILE` and `MICROSOCKS_PASSWORD_FILE` to file
+paths to keep the authentication values out of the command line and environment.
+Each file must contain 1 to 255 bytes, optionally followed by a newline (LF or
+CRLF). NUL and embedded newlines are rejected. Do not combine file credentials
+with `-u` or `-P`. If either file cannot be read or is invalid, microsocks exits
+before listening. Keep the files readable only by the service account.
+
+For example, a systemd service using `LoadCredential=` can set these environment
+variables to paths under `$CREDENTIALS_DIRECTORY`. The environment contains
+only file paths, not the username or password.
+
 for example, authenticate once using curl:
 
     curl --socks5 user:password@listenip:port anyurl
