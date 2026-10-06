@@ -18,6 +18,9 @@ INSTALL = ./install.sh
 
 all: $(PROG)
 
+check: $(PROG)
+	python3 tests/credential_files.py ./$(PROG)
+
 install: $(PROG)
 	$(INSTALL) -D -m 755 $(PROG) $(DESTDIR)$(bindir)/$(PROG)
 
@@ -31,5 +34,4 @@ clean:
 $(PROG): $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(LIBS) -o $@
 
-.PHONY: all clean install
-
+.PHONY: all check clean install

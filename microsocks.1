@@ -42,11 +42,11 @@ with user:password pair, it is added to a whitelist and may use the proxy
 without authorization. This is handy for programs like Firefox that don't
 support user:password authorization. For it to work you'd basically make one
 connection with another program that supports it, and then you can use Firefox
-too. This option requires options
+too. This option requires a username and password supplied either through
 .Fl u
 and
 .Fl P
-also to be specified.
+or through credential files.
 .It Fl b Ar ip
 Specifies IP address outgoing connections are bound to.
 .It Fl i Ar addr
@@ -81,6 +81,19 @@ or just
 To allow access ONLY to those IPs, choose an impossible to guess user:password
 combination.
 .El
+.Sh ENVIRONMENT
+.Ev MICROSOCKS_USERNAME_FILE
+and
+.Ev MICROSOCKS_PASSWORD_FILE
+may both be set to paths containing the authentication username and password.
+Each file must contain 1 to 255 bytes, optionally followed by LF or CRLF.
+NUL and embedded newlines are rejected. Do not combine these variables with
+.Fl u
+or
+.Fl P .
+If a file cannot be read or is invalid,
+.Nm
+exits before listening. Restrict file access to the service account.
 .Sh EXAMPLES
 Require authentication for all except two specified hosts.
 .Pp
